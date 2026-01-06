@@ -155,6 +155,8 @@ export class DeployerService {
           // Traefik labels for reverse proxy
           'traefik.enable': 'true',
           [`traefik.http.routers.${containerName}.rule`]: `Host(\`${projectSlug}.${this.domain}\`)`,
+          [`traefik.http.routers.${containerName}.entrypoints`]: 'web',
+          [`traefik.http.routers.${containerName}.service`]: containerName,
           [`traefik.http.services.${containerName}.loadbalancer.server.port`]: port.toString(),
         },
       });
