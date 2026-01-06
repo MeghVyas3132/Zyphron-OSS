@@ -91,7 +91,7 @@ export async function databaseRoutes(app: FastifyInstance): Promise<void> {
   app.get('/', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const query = querySchema.parse(request.query);
 
     const where = {
@@ -150,7 +150,7 @@ export async function databaseRoutes(app: FastifyInstance): Promise<void> {
   app.get('/projects/:projectId/databases', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { projectId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { projectId } = request.params;
 
     // Check project access
@@ -196,7 +196,7 @@ export async function databaseRoutes(app: FastifyInstance): Promise<void> {
   app.post('/projects/:projectId/databases', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { projectId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { projectId } = request.params;
     
     const parseResult = createDatabaseSchema.safeParse(request.body);
@@ -311,7 +311,7 @@ export async function databaseRoutes(app: FastifyInstance): Promise<void> {
   app.get('/databases/:databaseId', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { databaseId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { databaseId } = request.params;
 
     const database = await prisma.database.findFirst({
@@ -361,7 +361,7 @@ export async function databaseRoutes(app: FastifyInstance): Promise<void> {
   app.get('/databases/:databaseId/credentials', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { databaseId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { databaseId } = request.params;
 
     const database = await prisma.database.findFirst({
@@ -407,7 +407,7 @@ export async function databaseRoutes(app: FastifyInstance): Promise<void> {
   app.put('/databases/:databaseId', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { databaseId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { databaseId } = request.params;
     
     const parseResult = updateDatabaseSchema.safeParse(request.body);
@@ -471,7 +471,7 @@ export async function databaseRoutes(app: FastifyInstance): Promise<void> {
   app.delete('/databases/:databaseId', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { databaseId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { databaseId } = request.params;
 
     // Check access (only owner/admin can delete)
@@ -516,7 +516,7 @@ export async function databaseRoutes(app: FastifyInstance): Promise<void> {
   app.post('/databases/:databaseId/reset-password', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { databaseId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { databaseId } = request.params;
 
     // Check access

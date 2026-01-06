@@ -6,9 +6,10 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma.js';
 import { createLogger } from '@/lib/logger.js';
-import { producer } from '@/lib/kafka.js';
+import { sendDeploymentEvent } from '@/lib/kafka.js';
 import { publishEvent } from '@/lib/redis.js';
-import { createHmac, timingSafeEqual } from 'crypto';
+import { createHmac, timingSafeEqual, randomBytes } from 'crypto';
+import type { Project } from '@prisma/client';
 
 const logger = createLogger('webhooks');
 
@@ -17,30 +18,12 @@ const logger = createLogger('webhooks');
 // ===========================================
 
 const createWebhookSchema = z.object({
-  url: z.string().url(),
-  events: z.array(z.enum([
-    'deployment.created',
-    'deployment.started',
-    'deployment.success',
-    'deployment.failed',
-    'deployment.cancelled',
-    'build.started',
-    'build.success',
-    'build.failed',
-    'project.created',
-    'project.updated',
-    'project.deleted',
-    'database.created',
-    'database.deleted',
-  ])).min(1),
-  secret: z.string().optional(),
-  isActive: z.boolean().default(true),
+  provider: z.enum(['GITHUB', 'GITLAB', 'BITBUCKET']),
+  events: z.array(z.string()).min(1).default(['push']),
 });
 
 const updateWebhookSchema = z.object({
-  url: z.string().url().optional(),
   events: z.array(z.string()).optional(),
-  secret: z.string().optional(),
   isActive: z.boolean().optional(),
 });
 
@@ -59,40 +42,42 @@ const githubPushEventSchema = z.object({
     name: z.string(),
     email: z.string().optional(),
   }),
-  commits: z.array(z.object({
+  head_commit: z.object({
     id: z.string(),
     message: z.string(),
     author: z.object({
       name: z.string(),
       email: z.string(),
     }),
-  })),
-  head_commit: z.object({
+  }).optional(),
+  commits: z.array(z.object({
     id: z.string(),
     message: z.string(),
-  }).nullable(),
+  })),
 });
 
 // ===========================================
 // HELPER FUNCTIONS
 // ===========================================
 
+function generateWebhookSecret(): string {
+  return randomBytes(32).toString('hex');
+}
+
 function verifyGitHubSignature(payload: string, signature: string, secret: string): boolean {
-  const hmac = createHmac('sha256', secret);
-  const digest = 'sha256=' + hmac.update(payload).digest('hex');
+  if (!signature || !signature.startsWith('sha256=')) {
+    return false;
+  }
+  
+  const expectedSig = 'sha256=' + createHmac('sha256', secret)
+    .update(payload)
+    .digest('hex');
   
   try {
-    return timingSafeEqual(Buffer.from(digest), Buffer.from(signature));
+    return timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSig));
   } catch {
     return false;
   }
-}
-
-function generateSecret(): string {
-  return createHmac('sha256', Date.now().toString())
-    .update(Math.random().toString())
-    .digest('hex')
-    .substring(0, 32);
 }
 
 // ===========================================
@@ -100,18 +85,14 @@ function generateSecret(): string {
 // ===========================================
 
 export async function webhookRoutes(app: FastifyInstance): Promise<void> {
-  // ===========================================
-  // USER WEBHOOK MANAGEMENT
-  // ===========================================
-
   // List webhooks for a project
   app.get('/projects/:projectId/webhooks', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { projectId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { projectId } = request.params;
 
-    // Check project access
+    // Verify project ownership
     const project = await prisma.project.findFirst({
       where: {
         id: projectId,
@@ -123,13 +104,7 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
     });
 
     if (!project) {
-      return reply.status(404).send({
-        success: false,
-        error: {
-          code: 'PROJECT_NOT_FOUND',
-          message: 'Project not found or you do not have access',
-        },
-      });
+      return reply.code(404).send({ error: 'Project not found' });
     }
 
     const webhooks = await prisma.webhook.findMany({
@@ -137,80 +112,77 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
       orderBy: { createdAt: 'desc' },
     });
 
-    // Mask secrets
-    const maskedWebhooks = webhooks.map(wh => ({
-      ...wh,
-      secret: wh.secret ? '••••••••' : null,
-    }));
-
     return reply.send({
-      success: true,
-      data: { webhooks: maskedWebhooks },
+      webhooks: webhooks.map(w => ({
+        ...w,
+        secret: w.secret ? '••••••••' + w.secret.slice(-4) : null,
+      })),
     });
   });
 
-  // Create webhook
+  // Create webhook for a project
   app.post('/projects/:projectId/webhooks', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { projectId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { projectId } = request.params;
-    
-    const parseResult = createWebhookSchema.safeParse(request.body);
 
+    const parseResult = createWebhookSchema.safeParse(request.body);
     if (!parseResult.success) {
-      return reply.status(400).send({
-        success: false,
-        error: {
-          code: 'VALIDATION_ERROR',
-          message: 'Invalid request body',
-          details: parseResult.error.flatten(),
-        },
+      return reply.code(400).send({ 
+        error: 'Invalid request',
+        details: parseResult.error.flatten(),
       });
     }
 
     const data = parseResult.data;
 
-    // Check project access
+    // Verify project ownership
     const project = await prisma.project.findFirst({
       where: {
         id: projectId,
         OR: [
           { userId },
-          { team: { members: { some: { userId, role: { in: ['OWNER', 'ADMIN'] } } } } },
+          { team: { members: { some: { userId } } } },
         ],
       },
     });
 
     if (!project) {
-      return reply.status(404).send({
-        success: false,
-        error: {
-          code: 'PROJECT_NOT_FOUND',
-          message: 'Project not found or you do not have permission',
-        },
+      return reply.code(404).send({ error: 'Project not found' });
+    }
+
+    // Check for existing webhook with same provider
+    const existingWebhook = await prisma.webhook.findFirst({
+      where: { projectId, provider: data.provider },
+    });
+
+    if (existingWebhook) {
+      return reply.code(409).send({ 
+        error: 'Webhook already exists for this provider',
       });
     }
 
+    const secret = generateWebhookSecret();
+    const webhookId = `wh_${randomBytes(16).toString('hex')}`;
+
     const webhook = await prisma.webhook.create({
       data: {
-        url: data.url,
-        events: data.events,
-        secret: data.secret || generateSecret(),
-        isActive: data.isActive,
         projectId,
+        provider: data.provider,
+        webhookId,
+        secret,
+        events: data.events,
+        isActive: true,
       },
     });
 
-    logger.info({ webhookId: webhook.id, projectId, userId }, 'Webhook created');
+    logger.info({ webhookId: webhook.id, projectId }, 'Webhook created');
 
-    return reply.status(201).send({
-      success: true,
-      data: {
-        webhook: {
-          ...webhook,
-          secret: '••••••••',
-        },
+    return reply.code(201).send({
+      webhook: {
+        ...webhook,
+        webhookUrl: `${process.env.API_URL || 'http://api.localhost'}/api/v1/webhooks/github/${projectId}`,
       },
     });
   });
@@ -219,74 +191,56 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
   app.put('/projects/:projectId/webhooks/:webhookId', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { projectId: string; webhookId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { projectId, webhookId } = request.params;
-    
-    const parseResult = updateWebhookSchema.safeParse(request.body);
 
+    const parseResult = updateWebhookSchema.safeParse(request.body);
     if (!parseResult.success) {
-      return reply.status(400).send({
-        success: false,
-        error: {
-          code: 'VALIDATION_ERROR',
-          message: 'Invalid request body',
-          details: parseResult.error.flatten(),
-        },
+      return reply.code(400).send({
+        error: 'Invalid request',
+        details: parseResult.error.flatten(),
       });
     }
 
-    // Check project access
+    const data = parseResult.data;
+
+    // Verify project ownership
     const project = await prisma.project.findFirst({
       where: {
         id: projectId,
         OR: [
           { userId },
-          { team: { members: { some: { userId, role: { in: ['OWNER', 'ADMIN'] } } } } },
+          { team: { members: { some: { userId } } } },
         ],
       },
     });
 
     if (!project) {
-      return reply.status(404).send({
-        success: false,
-        error: {
-          code: 'PROJECT_NOT_FOUND',
-          message: 'Project not found or you do not have permission',
-        },
-      });
+      return reply.code(404).send({ error: 'Project not found' });
     }
 
-    const existing = await prisma.webhook.findFirst({
-      where: {
-        id: webhookId,
-        projectId,
+    const webhook = await prisma.webhook.findFirst({
+      where: { id: webhookId, projectId },
+    });
+
+    if (!webhook) {
+      return reply.code(404).send({ error: 'Webhook not found' });
+    }
+
+    const updatedWebhook = await prisma.webhook.update({
+      where: { id: webhookId },
+      data: {
+        ...(data.events && { events: data.events }),
+        ...(data.isActive !== undefined && { isActive: data.isActive }),
       },
     });
 
-    if (!existing) {
-      return reply.status(404).send({
-        success: false,
-        error: {
-          code: 'WEBHOOK_NOT_FOUND',
-          message: 'Webhook not found',
-        },
-      });
-    }
-
-    const webhook = await prisma.webhook.update({
-      where: { id: webhookId },
-      data: parseResult.data,
-    });
-
-    logger.info({ webhookId, projectId, userId }, 'Webhook updated');
+    logger.info({ webhookId, projectId }, 'Webhook updated');
 
     return reply.send({
-      success: true,
-      data: {
-        webhook: {
-          ...webhook,
-          secret: webhook.secret ? '••••••••' : null,
-        },
+      webhook: {
+        ...updatedWebhook,
+        secret: updatedWebhook.secret ? '••••••••' + updatedWebhook.secret.slice(-4) : null,
       },
     });
   });
@@ -295,116 +249,85 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
   app.delete('/projects/:projectId/webhooks/:webhookId', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { projectId: string; webhookId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { projectId, webhookId } = request.params;
 
-    // Check project access
+    // Verify project ownership
     const project = await prisma.project.findFirst({
       where: {
         id: projectId,
         OR: [
           { userId },
-          { team: { members: { some: { userId, role: { in: ['OWNER', 'ADMIN'] } } } } },
+          { team: { members: { some: { userId } } } },
         ],
       },
     });
 
     if (!project) {
-      return reply.status(404).send({
-        success: false,
-        error: {
-          code: 'PROJECT_NOT_FOUND',
-          message: 'Project not found or you do not have permission',
-        },
-      });
+      return reply.code(404).send({ error: 'Project not found' });
     }
 
-    const existing = await prisma.webhook.findFirst({
-      where: {
-        id: webhookId,
-        projectId,
-      },
+    const webhook = await prisma.webhook.findFirst({
+      where: { id: webhookId, projectId },
     });
 
-    if (!existing) {
-      return reply.status(404).send({
-        success: false,
-        error: {
-          code: 'WEBHOOK_NOT_FOUND',
-          message: 'Webhook not found',
-        },
-      });
+    if (!webhook) {
+      return reply.code(404).send({ error: 'Webhook not found' });
     }
 
     await prisma.webhook.delete({
       where: { id: webhookId },
     });
 
-    logger.info({ webhookId, projectId, userId }, 'Webhook deleted');
+    logger.info({ webhookId, projectId }, 'Webhook deleted');
 
-    return reply.send({
-      success: true,
-      data: { message: 'Webhook deleted successfully' },
-    });
+    return reply.code(204).send();
   });
 
   // Regenerate webhook secret
   app.post('/projects/:projectId/webhooks/:webhookId/regenerate-secret', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { projectId: string; webhookId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { projectId, webhookId } = request.params;
 
-    // Check project access
+    // Verify project ownership
     const project = await prisma.project.findFirst({
       where: {
         id: projectId,
         OR: [
           { userId },
-          { team: { members: { some: { userId, role: { in: ['OWNER', 'ADMIN'] } } } } },
+          { team: { members: { some: { userId } } } },
         ],
       },
     });
 
     if (!project) {
-      return reply.status(404).send({
-        success: false,
-        error: {
-          code: 'PROJECT_NOT_FOUND',
-          message: 'Project not found or you do not have permission',
-        },
-      });
+      return reply.code(404).send({ error: 'Project not found' });
     }
 
-    const existing = await prisma.webhook.findFirst({
-      where: {
-        id: webhookId,
-        projectId,
-      },
+    const webhook = await prisma.webhook.findFirst({
+      where: { id: webhookId, projectId },
     });
 
-    if (!existing) {
-      return reply.status(404).send({
-        success: false,
-        error: {
-          code: 'WEBHOOK_NOT_FOUND',
-          message: 'Webhook not found',
-        },
-      });
+    if (!webhook) {
+      return reply.code(404).send({ error: 'Webhook not found' });
     }
 
-    const newSecret = generateSecret();
-    
-    await prisma.webhook.update({
+    const newSecret = generateWebhookSecret();
+
+    const updatedWebhook = await prisma.webhook.update({
       where: { id: webhookId },
       data: { secret: newSecret },
     });
 
-    logger.info({ webhookId, projectId, userId }, 'Webhook secret regenerated');
+    logger.info({ webhookId, projectId }, 'Webhook secret regenerated');
 
     return reply.send({
-      success: true,
-      data: { secret: newSecret },
+      webhook: {
+        ...updatedWebhook,
+        secret: newSecret, // Return full secret only on regeneration
+      },
     });
   });
 
@@ -412,88 +335,67 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
   // GITHUB WEBHOOK RECEIVER
   // ===========================================
 
-  // GitHub webhook endpoint (no auth - uses signature verification)
-  app.post('/webhooks/github/:projectId', {
-    config: {
-      rawBody: true,
-    },
-  }, async (request: FastifyRequest<{ Params: { projectId: string } }>, reply: FastifyReply) => {
+  app.post('/webhooks/github/:projectId', async (
+    request: FastifyRequest<{ Params: { projectId: string } }>,
+    reply: FastifyReply
+  ) => {
     const { projectId } = request.params;
     const signature = request.headers['x-hub-signature-256'] as string;
     const event = request.headers['x-github-event'] as string;
     const deliveryId = request.headers['x-github-delivery'] as string;
 
-    logger.info({ projectId, event, deliveryId }, 'GitHub webhook received');
+    logger.info({ projectId, event, deliveryId }, 'Received GitHub webhook');
 
     // Find project
     const project = await prisma.project.findUnique({
       where: { id: projectId },
+      include: {
+        webhooks: {
+          where: { provider: 'GITHUB', isActive: true },
+        },
+      },
     });
 
     if (!project) {
-      logger.warn({ projectId }, 'Project not found for webhook');
-      return reply.status(404).send({
-        success: false,
-        error: {
-          code: 'PROJECT_NOT_FOUND',
-          message: 'Project not found',
-        },
-      });
+      logger.warn({ projectId }, 'Webhook received for unknown project');
+      return reply.code(404).send({ error: 'Project not found' });
     }
 
-    // Verify signature if secret is configured
-    if (project.webhookSecret) {
-      const rawBody = (request as FastifyRequest & { rawBody?: string }).rawBody || JSON.stringify(request.body);
-      
-      if (!signature || !verifyGitHubSignature(rawBody, signature, project.webhookSecret)) {
-        logger.warn({ projectId, deliveryId }, 'Invalid webhook signature');
-        return reply.status(401).send({
-          success: false,
-          error: {
-            code: 'INVALID_SIGNATURE',
-            message: 'Invalid webhook signature',
-          },
-        });
-      }
+    const webhook = project.webhooks[0];
+    if (!webhook) {
+      logger.warn({ projectId }, 'No active GitHub webhook configured');
+      return reply.code(404).send({ error: 'Webhook not configured' });
     }
 
-    // Handle different GitHub events
+    // Verify signature
+    const rawBody = JSON.stringify(request.body);
+    if (!verifyGitHubSignature(rawBody, signature, webhook.secret)) {
+      logger.warn({ projectId, deliveryId }, 'Invalid webhook signature');
+      return reply.code(401).send({ error: 'Invalid signature' });
+    }
+
+    // Handle different events
     switch (event) {
       case 'push':
         await handlePushEvent(project, request.body);
         break;
-      
       case 'pull_request':
         await handlePullRequestEvent(project, request.body);
         break;
-      
       case 'ping':
-        logger.info({ projectId }, 'GitHub webhook ping received');
+        logger.info({ projectId }, 'Received ping event');
         break;
-      
       default:
-        logger.info({ projectId, event }, 'Unhandled GitHub event');
+        logger.info({ projectId, event }, 'Ignoring unhandled event type');
     }
 
-    return reply.send({
-      success: true,
-      data: { received: true },
-    });
+    return reply.send({ received: true });
   });
 }
 
 // ===========================================
 // EVENT HANDLERS
 // ===========================================
-
-interface Project {
-  id: string;
-  name: string;
-  branch: string;
-  autoDeploy: boolean;
-  userId: string;
-  subdomain: string;
-}
 
 async function handlePushEvent(project: Project, payload: unknown): Promise<void> {
   const parseResult = githubPushEventSchema.safeParse(payload);
@@ -535,37 +437,27 @@ async function handlePushEvent(project: Project, payload: unknown): Promise<void
       branch,
       commitSha: data.after,
       commitMessage: data.head_commit?.message || data.commits[0]?.message || 'No commit message',
-      environment: 'production',
-      status: 'PENDING',
-      url: `https://${project.subdomain}.${process.env.BASE_DOMAIN || 'localhost'}`,
+      environment: 'PRODUCTION',
+      status: 'QUEUED',
+      trigger: 'GIT_PUSH',
     },
   });
 
-  // Create build record
-  const build = await prisma.build.create({
+  // Create build job
+  await prisma.buildJob.create({
     data: {
       deploymentId: deployment.id,
-      projectId: project.id,
       status: 'PENDING',
     },
   });
 
-  // Publish to Kafka for worker to pick up
-  await producer.send({
-    topic: 'deployment-events',
-    messages: [{
-      key: project.id,
-      value: JSON.stringify({
-        type: 'DEPLOYMENT_CREATED',
-        deploymentId: deployment.id,
-        buildId: build.id,
-        projectId: project.id,
-        trigger: 'github_push',
-        commitSha: data.after,
-        branch,
-        timestamp: new Date().toISOString(),
-      }),
-    }],
+  // Send to Kafka for worker processing
+  await sendDeploymentEvent(deployment.id, 'DEPLOYMENT_CREATED', {
+    projectId: project.id,
+    branch,
+    commitSha: data.after,
+    trigger: 'GIT_PUSH',
+    pusher: data.pusher.name,
   });
 
   // Publish real-time update
@@ -583,7 +475,14 @@ async function handlePushEvent(project: Project, payload: unknown): Promise<void
 }
 
 async function handlePullRequestEvent(project: Project, payload: unknown): Promise<void> {
-  const pr = payload as { action: string; number: number; pull_request: { head: { sha: string; ref: string }; title: string } };
+  const pr = payload as { 
+    action: string; 
+    number: number; 
+    pull_request: { 
+      head: { sha: string; ref: string }; 
+      title: string;
+    };
+  };
   
   logger.info({
     projectId: project.id,
@@ -604,41 +503,39 @@ async function handlePullRequestEvent(project: Project, payload: unknown): Promi
       branch: pr.pull_request.head.ref,
       commitSha: pr.pull_request.head.sha,
       commitMessage: pr.pull_request.title,
-      environment: 'preview',
-      status: 'PENDING',
-      url: `https://${project.subdomain}-pr-${pr.number}.${process.env.BASE_DOMAIN || 'localhost'}`,
+      environment: 'PREVIEW',
+      status: 'QUEUED',
+      trigger: 'GIT_PUSH',
     },
   });
 
-  const build = await prisma.build.create({
+  // Create build job
+  await prisma.buildJob.create({
     data: {
       deploymentId: deployment.id,
-      projectId: project.id,
       status: 'PENDING',
     },
   });
 
-  await producer.send({
-    topic: 'deployment-events',
-    messages: [{
-      key: project.id,
-      value: JSON.stringify({
-        type: 'DEPLOYMENT_CREATED',
-        deploymentId: deployment.id,
-        buildId: build.id,
-        projectId: project.id,
-        trigger: 'github_pull_request',
-        commitSha: pr.pull_request.head.sha,
-        branch: pr.pull_request.head.ref,
-        prNumber: pr.number,
-        timestamp: new Date().toISOString(),
-      }),
-    }],
+  // Send to Kafka for worker processing
+  await sendDeploymentEvent(deployment.id, 'DEPLOYMENT_CREATED', {
+    projectId: project.id,
+    branch: pr.pull_request.head.ref,
+    commitSha: pr.pull_request.head.sha,
+    trigger: 'GIT_PUSH',
+    prNumber: pr.number,
+  });
+
+  // Publish real-time update
+  await publishEvent('deployments', {
+    type: 'DEPLOYMENT_STARTED',
+    deploymentId: deployment.id,
+    projectId: project.id,
   });
 
   logger.info({
     deploymentId: deployment.id,
     projectId: project.id,
     prNumber: pr.number,
-  }, 'Preview deployment triggered from GitHub PR');
+  }, 'Preview deployment triggered from PR');
 }
