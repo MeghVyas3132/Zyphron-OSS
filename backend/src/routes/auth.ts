@@ -217,7 +217,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.get('/me', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -263,7 +263,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.post('/refresh', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const email = request.user?.email as string;
 
     const token = app.jwt.sign({

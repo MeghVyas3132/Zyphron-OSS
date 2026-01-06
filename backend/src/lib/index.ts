@@ -30,3 +30,17 @@ export {
   checkKafkaHealth,
   producer,
 } from './kafka.js';
+export {
+  rateLimitConfig,
+  sanitizeString,
+  sanitizeUrl,
+  isValidSlug,
+  apiKeyAuthentication,
+  formatValidationError,
+  validationErrorResponse,
+  commonSchemas,
+  securityHeaders,
+  logSensitiveOperation,
+  getClientIp,
+  rateLimitKeys,
+} from './security.js';
