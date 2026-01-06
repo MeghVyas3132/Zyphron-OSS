@@ -6,12 +6,13 @@
 
 http:
   routers:
-    # Zyphron API Router
+    # Zyphron API Router - only for api.localhost
     api-router:
-      rule: "Host(`api.localhost`) || PathPrefix(`/api`)"
+      rule: "Host(`api.localhost`)"
       service: api-service
       entryPoints:
         - web
+      priority: 100
       
     # Zyphron Frontend Router
     frontend-router:
@@ -19,6 +20,7 @@ http:
       service: frontend-service
       entryPoints:
         - web
+      priority: 100
 
     # Catch-all for deployed apps (*.localhost)
     # Individual apps get their own routers via Docker labels

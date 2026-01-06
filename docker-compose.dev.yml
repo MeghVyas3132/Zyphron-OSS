@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # ===========================================
   # FRONTEND WEB APP
@@ -82,8 +80,9 @@ services:
       - zyphron-network
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.api.rule=Host(`api.localhost`) || PathPrefix(`/api`)"
+      - "traefik.http.routers.api.rule=Host(`api.localhost`)"
       - "traefik.http.routers.api.entrypoints=web"
+      - "traefik.http.routers.api.priority=100"
       - "traefik.http.services.api.loadbalancer.server.port=3000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
@@ -100,7 +99,6 @@ services:
       context: .
       dockerfile: docker/Dockerfile.worker
       target: development
-    container_name: zyphron-worker
     restart: unless-stopped
     environment:
       - NODE_ENV=development
@@ -109,7 +107,9 @@ services:
       - DATABASE_URL=postgresql://zyphron:zyphron_secret@postgres:5432/zyphron?schema=public
       - PROJECTS_DIR=/var/www/projects
       - CONTAINER_REGISTRY=registry:5000
+      - BASE_DOMAIN=localhost
       - LOG_LEVEL=debug
+      - JWT_SECRET=dev-jwt-secret-change-in-production-minimum-32-chars
     volumes:
       - ./backend/src:/app/src:ro
       - ./backend/package.json:/app/package.json:ro
@@ -124,8 +124,7 @@ services:
       - registry
     networks:
       - zyphron-network
-    deploy:
-      replicas: 2
+    scale: 2
 
   # ===========================================
   # POSTGRESQL DATABASE
@@ -249,7 +248,7 @@ services:
     container_name: zyphron-registry
     restart: unless-stopped
     ports:
-      - "5000:5000"
+      - "5050:5000"
     environment:
       REGISTRY_STORAGE_DELETE_ENABLED: "true"
     volumes:
@@ -414,6 +413,7 @@ services:
 # ===========================================
 networks:
   zyphron-network:
+    name: zyphron-network  # Explicit name to avoid docker-compose prefix
     driver: bridge
     ipam:
       config:

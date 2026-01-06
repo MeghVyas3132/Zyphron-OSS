@@ -16,6 +16,8 @@ RUN apk add --no-cache \
     make \
     g++ \
     docker-cli \
+    openssl \
+    openssl-dev \
     && rm -rf /var/cache/apk/*
 
 WORKDIR /app
@@ -29,7 +31,7 @@ COPY backend/package*.json ./
 FROM base AS development
 
 # Install all dependencies including devDependencies
-RUN npm ci
+RUN npm install
 
 # Copy backend source code
 COPY backend/ .
