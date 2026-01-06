@@ -21,12 +21,16 @@ import { healthRoutes } from '@/routes/health.js';
 import { authRoutes } from '@/routes/auth.js';
 import { projectRoutes } from '@/routes/projects.js';
 import { deploymentRoutes } from '@/routes/deployments.js';
+import { serviceRoutes } from '@/routes/services.js';
 import { envRoutes } from '@/routes/env.js';
 import { databaseRoutes } from '@/routes/databases.js';
 import { webhookRoutes } from '@/routes/webhooks.js';
 import { metricsRoutes } from '@/routes/metrics.js';
 import { websocketRoutes } from '@/routes/ws.js';
 import { domainRoutes } from '@/routes/domains.js';
+import { teamRoutes } from '@/routes/teams.js';
+import { apiKeyRoutes } from '@/routes/api-keys.js';
+import { auditRoutes } from '@/routes/audit.js';
 
 // ===========================================
 // CREATE APPLICATION
@@ -155,6 +159,21 @@ export async function createApp(): Promise<FastifyInstance> {
     request: FastifyRequest,
     reply: FastifyReply
   ) {
+    // Dev mode bypass - skip auth for easier testing
+    if (config.env === 'development') {
+      const authHeader = request.headers.authorization;
+      if (authHeader === 'Bearer dev-token') {
+        // Set a mock user for development (cast to any to add sub field)
+        (request as unknown as { user: { id: string; sub: string; email: string; name: string } }).user = {
+          id: 'dev-user-id',
+          sub: 'dev-user-id',
+          email: 'dev@zyphron.dev',
+          name: 'Dev User',
+        };
+        return;
+      }
+    }
+
     try {
       await request.jwtVerify();
     } catch (err) {
@@ -235,12 +254,16 @@ export async function createApp(): Promise<FastifyInstance> {
   await app.register(healthRoutes, { prefix: '/health' });
   await app.register(authRoutes, { prefix: '/api/v1/auth' });
   await app.register(projectRoutes, { prefix: '/api/v1/projects' });
-  await app.register(deploymentRoutes, { prefix: '/api/v1/deployments' });
+  await app.register(deploymentRoutes, { prefix: '/api/v1' });  // Has /projects/:id/deployments and /deployments/:id routes
+  await app.register(serviceRoutes, { prefix: '/api/v1' });  // Services under /api/v1/projects/:projectId/services
   await app.register(envRoutes, { prefix: '/api/v1/projects' });
   await app.register(databaseRoutes, { prefix: '/api/v1/databases' });
-  await app.register(webhookRoutes, { prefix: '/api/v1/webhooks' });
+  await app.register(webhookRoutes, { prefix: '/api/v1' });  // Webhooks under /api/v1/projects/:projectId/webhooks and /api/v1/webhooks/github/:projectId
   await app.register(domainRoutes, { prefix: '/api/v1' });
-  await app.register(metricsRoutes, { prefix: '/metrics' });
+  await app.register(metricsRoutes, { prefix: '/api/v1' });
+  await app.register(teamRoutes, { prefix: '/api/v1/teams' });
+  await app.register(apiKeyRoutes, { prefix: '/api/v1/api-keys' });
+  await app.register(auditRoutes, { prefix: '/api/v1/audit' });
   await app.register(websocketRoutes);
 
   return app;

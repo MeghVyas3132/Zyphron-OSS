@@ -16,6 +16,10 @@ import { getBuilderService } from './services/builder/index.js';
 import { getDeployerService } from './services/deployer/index.js';
 import { getBuildLogPublisher } from './routes/ws.js';
 
+// Multi-service deployment
+import { getMultiServiceDetector, MultiServiceConfig } from './services/detector/multi-service.js';
+import { ParallelMultiServiceDeployer } from './services/deployer/parallel.js';
+
 const logger = createLogger('worker');
 
 // Store consumers for cleanup
@@ -26,6 +30,14 @@ const gitService = getGitService('/tmp/zyphron/repos');
 const builderService = getBuilderService(config.docker.registry || 'localhost:5000');
 const deployerService = getDeployerService('zyphron-network', config.deployment.baseDomain || 'localhost');
 const logPublisher = getBuildLogPublisher();
+
+// Multi-service deployer
+const multiServiceDetector = getMultiServiceDetector();
+const parallelDeployer = new ParallelMultiServiceDeployer(
+  'zyphron-network',
+  config.deployment.baseDomain || 'localhost',
+  config.docker.registry || 'localhost:5000'
+);
 
 // ===========================================
 // DEPLOYMENT EVENT HANDLER
@@ -83,7 +95,7 @@ async function handleDeploymentEvent(topic: string, message: unknown): Promise<v
         where: { id: event.deploymentId },
         data: {
           status: 'FAILED',
-          finishedAt: new Date(),
+          completedAt: new Date(),
         },
       });
     }
@@ -138,14 +150,14 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
     // =============================================
     // STEP 1: Clone Repository
     // =============================================
-    await publishLog(`📦 Cloning repository: ${project.repoUrl}`, 'info', 'clone', 10);
-    logger.info({ deploymentId, repoUrl: project.repoUrl }, 'Cloning repository');
+    await publishLog(`📦 Cloning repository: ${project.repositoryUrl}`, 'info', 'clone', 10);
+    logger.info({ deploymentId, repoUrl: project.repositoryUrl }, 'Cloning repository');
 
     const cloneResult = await gitService.cloneRepository(
-      project.repoUrl,
+      project.repositoryUrl,
       deploymentId,
-      event.branch || project.defaultBranch || 'main',
-      project.gitToken || undefined
+      event.branch || project.branch || 'main',
+      undefined // TODO: Add git token support
     );
 
     if (!cloneResult.success) {
@@ -173,7 +185,33 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
     });
 
     // =============================================
-    // STEP 2: Detect Project Framework
+    // STEP 2: Detect Multi-Service Project
+    // =============================================
+    await publishLog('🔍 Analyzing project structure...', 'info', 'detect', 22);
+    
+    const multiServiceConfig = await multiServiceDetector.detect(cloneResult.path);
+    
+    // Check if this is a multi-service project (more than 1 service)
+    const isMultiService = multiServiceConfig.services.length > 1 || 
+                          multiServiceConfig.managedServices.length > 0 ||
+                          multiServiceConfig.detectionSource !== 'single';
+    
+    if (isMultiService) {
+      // Route to multi-service deployment
+      await handleMultiServiceDeployment(
+        event,
+        project,
+        cloneResult,
+        multiServiceConfig,
+        envVars,
+        startTime,
+        publishLog
+      );
+      return; // Multi-service handler takes over
+    }
+
+    // =============================================
+    // STEP 3: Detect Project Framework (Single Service)
     // =============================================
     await publishLog('🔍 Detecting project framework...', 'info', 'detect', 25);
     logger.info({ deploymentId }, 'Detecting project framework');
@@ -321,6 +359,7 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
       where: { id: deploymentId },
       data: {
         status: 'LIVE',
+        url: deployResult.externalUrl,  // Update with actual deployed URL
         completedAt: new Date(),
         deployDuration,
         metadata: {
@@ -403,6 +442,297 @@ async function handleDeploymentCancelled(event: DeploymentEvent): Promise<void> 
   // 2. Clean up any partial resources
 
   logger.info({ deploymentId }, 'Deployment cancellation processed');
+}
+
+// ===========================================
+// MULTI-SERVICE DEPLOYMENT HANDLER
+// ===========================================
+
+interface CloneResult {
+  success: boolean;
+  path: string;
+  commitHash: string;
+  commitMessage: string;
+  author: string;
+  branch: string;
+  error?: string;
+}
+
+interface ProjectWithEnv {
+  id: string;
+  slug: string;
+  repositoryUrl: string;
+  branch?: string | null;
+  memoryLimit?: string | null;
+  cpuLimit?: string | null;
+  envVariables: Array<{ key: string; value: string }>;
+}
+
+async function handleMultiServiceDeployment(
+  event: DeploymentEvent,
+  project: ProjectWithEnv,
+  _cloneResult: CloneResult, // Clone path used by detector
+  multiServiceConfig: MultiServiceConfig,
+  envVars: Record<string, string>,
+  startTime: number,
+  publishLog: (message: string, level?: 'info' | 'warn' | 'error', step?: string, progress?: number) => Promise<void>
+): Promise<void> {
+  const { deploymentId, projectId } = event;
+
+  logger.info({
+    deploymentId,
+    projectId,
+    services: multiServiceConfig.services.length,
+    managedServices: multiServiceConfig.managedServices.length,
+    detectionSource: multiServiceConfig.detectionSource,
+  }, 'Starting multi-service deployment');
+
+  await publishLog(
+    `🎯 Detected multi-service project (${multiServiceConfig.detectionSource}): ${multiServiceConfig.services.length} app services, ${multiServiceConfig.managedServices.length} managed services`,
+    'info',
+    'detect',
+    25
+  );
+
+  // Update project as multi-service
+  await prisma.project.update({
+    where: { id: projectId },
+    data: {
+      isMultiService: true,
+      serviceDetectionSource: multiServiceConfig.detectionSource,
+    },
+  });
+
+  // List all detected services
+  for (const service of multiServiceConfig.services) {
+    await publishLog(
+      `  📦 ${service.name} (${service.type}) - port ${service.port || 'auto'}${service.dependsOn?.length ? ` → depends on: ${service.dependsOn.join(', ')}` : ''}`,
+      'info',
+      'detect'
+    );
+  }
+
+  for (const managed of multiServiceConfig.managedServices) {
+    await publishLog(`  🗄️ ${managed.name} (${managed.type})`, 'info', 'detect');
+  }
+
+  // Set up parallel deployer event listeners
+  // Events emit objects with known properties
+  parallelDeployer.on('phase', async (...args: unknown[]) => {
+    const data = args[0] as { phase: string; message: string };
+    await publishLog(`📍 ${data.message}`, 'info', data.phase);
+  });
+
+  parallelDeployer.on('service:build:start', async (...args: unknown[]) => {
+    const data = args[0] as { service: string };
+    await publishLog(`🔨 Building ${data.service}...`, 'info', 'build');
+  });
+
+  parallelDeployer.on('service:build:complete', async (...args: unknown[]) => {
+    const data = args[0] as { service: string; duration: number };
+    await publishLog(`✅ ${data.service} built in ${Math.round(data.duration / 1000)}s`, 'info', 'build');
+  });
+
+  parallelDeployer.on('service:build:failed', async (...args: unknown[]) => {
+    const data = args[0] as { service: string; error: string };
+    await publishLog(`❌ ${data.service} build failed: ${data.error}`, 'error', 'build');
+  });
+
+  parallelDeployer.on('service:deploy:start', async (...args: unknown[]) => {
+    const data = args[0] as { service: string };
+    await publishLog(`🚢 Deploying ${data.service}...`, 'info', 'deploy');
+  });
+
+  parallelDeployer.on('service:deploy:complete', async (...args: unknown[]) => {
+    const data = args[0] as { service: string; externalUrl?: string };
+    await publishLog(
+      `✅ ${data.service} deployed${data.externalUrl ? `: ${data.externalUrl}` : ''}`,
+      'info',
+      'deploy'
+    );
+  });
+
+  parallelDeployer.on('service:deploy:failed', async (...args: unknown[]) => {
+    const data = args[0] as { service: string; error: string };
+    await publishLog(`❌ ${data.service} deploy failed: ${data.error}`, 'error', 'deploy');
+  });
+
+  // Execute parallel deployment
+  await publishLog('🚀 Starting parallel deployment...', 'info', 'deploy', 30);
+  await logPublisher.publishStatus(deploymentId, {
+    status: 'BUILDING',
+    message: 'Building services in parallel...',
+  });
+
+  try {
+    const result = await parallelDeployer.deploy({
+      config: multiServiceConfig,
+      deploymentId,
+      projectId,
+      projectSlug: project.slug,
+      envVars,
+      maxConcurrentBuilds: 4,  // Build up to 4 services in parallel
+      maxConcurrentDeploys: 6, // Deploy up to 6 containers in parallel
+    });
+
+    if (!result.success) {
+      const failedServices = result.services.filter(s => s.status === 'failed');
+      const errorMsg = failedServices.map(s => `${s.name}: ${s.error}`).join('; ');
+      throw new Error(`Multi-service deployment failed: ${errorMsg}`);
+    }
+
+    // Deployment succeeded - update database
+    const totalDuration = Date.now() - startTime;
+
+    // Find the primary service (first exposed service)
+    const primaryService = result.services.find(s => s.externalUrl) || result.services[0];
+    const primaryUrl = primaryService?.externalUrl || `http://${project.slug}.${config.deployment.baseDomain}`;
+
+    // Update deployment status
+    await prisma.deployment.update({
+      where: { id: deploymentId },
+      data: {
+        status: 'LIVE',
+        url: primaryUrl,
+        completedAt: new Date(),
+        buildDuration: Math.round(result.totalBuildTime / 1000),
+        deployDuration: Math.round(result.totalDeployTime / 1000),
+        metadata: {
+          isMultiService: true,
+          services: result.services.map(s => ({
+            name: s.name,
+            status: s.status,
+            containerId: s.containerId,
+            containerName: s.containerName,
+            internalUrl: s.internalUrl,
+            externalUrl: s.externalUrl,
+            port: s.port,
+            buildDuration: s.buildDuration,
+            deployDuration: s.deployDuration,
+          })),
+          networkName: result.networkName,
+          totalBuildTime: result.totalBuildTime,
+          totalDeployTime: result.totalDeployTime,
+        },
+      },
+    });
+
+    // Create/update Service records in database
+    for (const service of result.services) {
+      // Generate slug from name
+      const serviceSlug = service.name.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-');
+      
+      await prisma.service.upsert({
+        where: {
+          projectId_name: {
+            projectId,
+            name: service.name,
+          },
+        },
+        create: {
+          projectId,
+          name: service.name,
+          slug: serviceSlug,
+          type: service.containerId ? 'APP' : 'MANAGED',
+          status: service.status === 'running' ? 'RUNNING' : 'FAILED',
+          port: service.port,
+          containerId: service.containerId,
+          containerName: service.containerName,
+          internalUrl: service.internalUrl,
+          externalUrl: service.externalUrl,
+        },
+        update: {
+          status: service.status === 'running' ? 'RUNNING' : 'FAILED',
+          containerId: service.containerId,
+          containerName: service.containerName,
+          internalUrl: service.internalUrl,
+          externalUrl: service.externalUrl,
+        },
+      });
+    }
+
+    // Success messages
+    await publishLog(
+      `🎉 Multi-service deployment complete! ${result.services.length} services deployed in ${Math.round(totalDuration / 1000)}s`,
+      'info',
+      'complete',
+      100
+    );
+
+    // Log all service URLs
+    for (const service of result.services) {
+      if (service.externalUrl) {
+        await publishLog(`  🌐 ${service.name}: ${service.externalUrl}`, 'info', 'complete');
+      } else if (service.internalUrl) {
+        await publishLog(`  🔒 ${service.name}: ${service.internalUrl} (internal)`, 'info', 'complete');
+      }
+    }
+
+    await logPublisher.publishStatus(deploymentId, {
+      status: 'LIVE',
+      message: 'Multi-service deployment successful',
+      url: primaryUrl,
+    });
+
+    await logPublisher.publishProjectEvent(projectId, {
+      type: 'deployment_completed',
+      deploymentId,
+      message: `Multi-service deployment completed: ${result.services.length} services in ${Math.round(totalDuration / 1000)}s`,
+      metadata: {
+        url: primaryUrl,
+        services: result.services.map(s => s.name),
+      },
+    });
+
+    logger.info({
+      deploymentId,
+      projectId,
+      duration: totalDuration,
+      services: result.services.length,
+      buildTime: result.totalBuildTime,
+      deployTime: result.totalDeployTime,
+    }, 'Multi-service deployment completed successfully');
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+    logger.error({
+      deploymentId,
+      projectId,
+      error: errorMessage,
+    }, 'Multi-service deployment failed');
+
+    await logPublisher.publishStatus(deploymentId, {
+      status: 'FAILED',
+      message: errorMessage,
+    });
+
+    await logPublisher.publishProjectEvent(projectId, {
+      type: 'deployment_failed',
+      deploymentId,
+      message: errorMessage,
+    });
+
+    await prisma.deployment.update({
+      where: { id: deploymentId },
+      data: {
+        status: 'FAILED',
+        completedAt: new Date(),
+        errorMessage,
+      },
+    });
+
+    // Cleanup
+    await gitService.cleanup(deploymentId);
+
+    throw error;
+  } finally {
+    // Remove all event listeners to prevent memory leaks
+    parallelDeployer.removeAllListeners();
+    
+    // Cleanup cloned repository
+    await gitService.cleanup(deploymentId);
+  }
 }
 
 async function handleBuildCompleted(event: DeploymentEvent): Promise<void> {
