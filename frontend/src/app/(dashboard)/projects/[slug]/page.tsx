@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
@@ -17,46 +17,25 @@ import {
   XCircle,
   Loader2,
   Activity,
-  Terminal
+  Terminal,
+  AlertCircle
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { formatRelativeTime } from '@/lib/utils';
-
-interface Project {
-  id: string;
-  name: string;
-  slug: string;
-  framework: string;
-  gitUrl: string;
-  defaultBranch: string;
-  productionUrl: string | null;
-  rootDirectory: string;
-  buildCommand: string | null;
-  outputDirectory: string | null;
-  installCommand: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface Deployment {
-  id: string;
-  status: 'PENDING' | 'BUILDING' | 'DEPLOYING' | 'READY' | 'FAILED' | 'CANCELLED';
-  branch: string;
-  commitSha: string;
-  commitMessage: string;
-  createdAt: string;
-  completedAt: string | null;
-  url: string | null;
-  logs: string | null;
-}
+import { useProject, useDeleteProject } from '@/hooks/use-projects';
+import { useDeployments, useDeploy } from '@/hooks/use-deployments';
+import type { Project, Deployment } from '@/lib/api';
 
 const statusConfig = {
+  QUEUED: { icon: Clock, color: 'text-yellow-500', bg: 'bg-yellow-500/10', label: 'Queued' },
   PENDING: { icon: Clock, color: 'text-yellow-500', bg: 'bg-yellow-500/10', label: 'Pending' },
   BUILDING: { icon: Loader2, color: 'text-blue-500', bg: 'bg-blue-500/10', label: 'Building', animate: true },
   DEPLOYING: { icon: Loader2, color: 'text-blue-500', bg: 'bg-blue-500/10', label: 'Deploying', animate: true },
+  LIVE: { icon: CheckCircle2, color: 'text-green-500', bg: 'bg-green-500/10', label: 'Live' },
   READY: { icon: CheckCircle2, color: 'text-green-500', bg: 'bg-green-500/10', label: 'Ready' },
   FAILED: { icon: XCircle, color: 'text-red-500', bg: 'bg-red-500/10', label: 'Failed' },
   CANCELLED: { icon: XCircle, color: 'text-gray-500', bg: 'bg-gray-500/10', label: 'Cancelled' },
+  ROLLING_BACK: { icon: Loader2, color: 'text-orange-500', bg: 'bg-orange-500/10', label: 'Rolling Back', animate: true },
 };
 
 const frameworkIcons: Record<string, string> = {
@@ -65,12 +44,19 @@ const frameworkIcons: Record<string, string> = {
   vue: '💚',
   nuxt: '💚',
   svelte: '🔥',
+  sveltekit: '🔥',
   angular: '🔺',
   express: '⚡',
   fastify: '⚡',
   nestjs: '🐱',
+  flask: '🐍',
+  django: '🐍',
+  fastapi: '🐍',
+  go: '🐹',
+  rust: '🦀',
   static: '📄',
   docker: '🐳',
+  unknown: '📦',
 };
 
 export default function ProjectDetailPage() {
@@ -78,131 +64,65 @@ export default function ProjectDetailPage() {
   const router = useRouter();
   const slug = params.slug as string;
   
-  const [project, setProject] = useState<Project | null>(null);
-  const [deployments, setDeployments] = useState<Deployment[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [deploying, setDeploying] = useState(false);
   const [activeTab, setActiveTab] = useState<'deployments' | 'settings' | 'logs'>('deployments');
+  
+  // Use React Query hooks
+  const { data: projectData, isLoading: projectLoading, isError: projectError, error: projectFetchError, refetch: refetchProject } = useProject(slug);
+  const { data: deploymentsData, isLoading: deploymentsLoading, refetch: refetchDeployments } = useDeployments(slug);
+  const deployMutation = useDeploy(slug);
+  const deleteMutation = useDeleteProject();
 
-  useEffect(() => {
-    const fetchProject = async () => {
-      try {
-        const token = localStorage.getItem('auth-token');
-        const [projectRes, deploymentsRes] = await Promise.all([
-          fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/projects/${slug}`, {
-            headers: { Authorization: `Bearer ${token}` },
-          }),
-          fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/projects/${slug}/deployments`, {
-            headers: { Authorization: `Bearer ${token}` },
-          }),
-        ]);
+  const project = projectData?.data;
+  const deployments = deploymentsData?.data || [];
+  const isLoading = projectLoading || deploymentsLoading;
 
-        if (projectRes.ok) {
-          const projectData = await projectRes.json();
-          setProject(projectData.data);
-        }
-        if (deploymentsRes.ok) {
-          const deploymentsData = await deploymentsRes.json();
-          setDeployments(deploymentsData.data || []);
-        }
-      } catch (error) {
-        console.error('Failed to fetch project:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchProject();
-  }, [slug]);
-
-  // Mock data for development
-  const mockProject: Project = {
-    id: '1',
-    name: 'My Portfolio',
-    slug: 'my-portfolio',
-    framework: 'nextjs',
-    gitUrl: 'https://github.com/user/my-portfolio',
-    defaultBranch: 'main',
-    productionUrl: 'https://my-portfolio.zyphron.app',
-    rootDirectory: './',
-    buildCommand: 'npm run build',
-    outputDirectory: '.next',
-    installCommand: 'npm install',
-    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7).toISOString(),
-    updatedAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
-  };
-
-  const mockDeployments: Deployment[] = [
-    {
-      id: '1',
-      status: 'READY',
-      branch: 'main',
-      commitSha: 'abc1234def5678',
-      commitMessage: 'feat: add contact form',
-      createdAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
-      completedAt: new Date(Date.now() - 1000 * 60 * 28).toISOString(),
-      url: 'https://my-portfolio.zyphron.app',
-      logs: null,
-    },
-    {
-      id: '2',
-      status: 'READY',
-      branch: 'main',
-      commitSha: 'xyz9876abc5432',
-      commitMessage: 'fix: mobile responsive issues',
-      createdAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(),
-      completedAt: new Date(Date.now() - 1000 * 60 * 60 * 2 + 90000).toISOString(),
-      url: 'https://deployment-2.my-portfolio.zyphron.app',
-      logs: null,
-    },
-    {
-      id: '3',
-      status: 'FAILED',
-      branch: 'feature/blog',
-      commitSha: 'qwe4567rty8901',
-      commitMessage: 'feat: add blog section (WIP)',
-      createdAt: new Date(Date.now() - 1000 * 60 * 60 * 5).toISOString(),
-      completedAt: new Date(Date.now() - 1000 * 60 * 60 * 5 + 45000).toISOString(),
-      url: null,
-      logs: 'Build failed: Module not found: react-markdown',
-    },
-  ];
-
-  const displayProject = project || mockProject;
-  const displayDeployments = deployments.length > 0 ? deployments : mockDeployments;
-  const frameworkIcon = frameworkIcons[displayProject.framework] || '📦';
+  const frameworkIcon = frameworkIcons[project?.framework || 'unknown'] || '📦';
 
   const handleDeploy = async () => {
-    setDeploying(true);
     try {
-      const token = localStorage.getItem('auth-token');
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/v1/projects/${slug}/deployments`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ branch: displayProject.defaultBranch }),
-        }
-      );
-
-      if (response.ok) {
-        // Refresh deployments list
-        window.location.reload();
-      }
+      await deployMutation.mutateAsync({ branch: project?.defaultBranch });
+      refetchDeployments();
     } catch (error) {
       console.error('Failed to deploy:', error);
-    } finally {
-      setDeploying(false);
     }
   };
 
-  if (loading) {
+  const handleDelete = async () => {
+    if (!project) return;
+    if (!confirm(`Are you sure you want to delete "${project.name}"? This cannot be undone.`)) return;
+    
+    try {
+      await deleteMutation.mutateAsync(project.slug);
+      router.push('/projects');
+    } catch (error) {
+      console.error('Failed to delete project:', error);
+    }
+  };
+
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  if (projectError || !project) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 gap-4">
+        <AlertCircle className="h-12 w-12 text-destructive" />
+        <p className="text-muted-foreground">
+          {projectFetchError instanceof Error ? projectFetchError.message : 'Failed to load project'}
+        </p>
+        <div className="flex gap-2">
+          <Button onClick={() => refetchProject()} variant="outline" className="gap-2">
+            <RefreshCw className="h-4 w-4" />
+            Retry
+          </Button>
+          <Link href="/projects">
+            <Button variant="ghost">Back to Projects</Button>
+          </Link>
+        </div>
       </div>
     );
   }
@@ -219,21 +139,21 @@ export default function ProjectDetailPage() {
         <div className="flex items-center gap-3 flex-1">
           <span className="text-3xl">{frameworkIcon}</span>
           <div>
-            <h1 className="text-2xl font-bold">{displayProject.name}</h1>
+            <h1 className="text-2xl font-bold">{project.name}</h1>
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
               <div className="flex items-center gap-1">
                 <GitBranch className="h-4 w-4" />
-                <span>{displayProject.defaultBranch}</span>
+                <span>{project.defaultBranch}</span>
               </div>
-              {displayProject.productionUrl && (
+              {project.productionUrl && (
                 <a
-                  href={displayProject.productionUrl}
+                  href={project.productionUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-1 hover:text-primary"
                 >
                   <Globe className="h-4 w-4" />
-                  <span>{displayProject.productionUrl.replace('https://', '')}</span>
+                  <span>{project.productionUrl.replace('https://', '').replace('http://', '')}</span>
                   <ExternalLink className="h-3 w-3" />
                 </a>
               )}
@@ -241,11 +161,14 @@ export default function ProjectDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="outline" size="icon" onClick={() => { refetchProject(); refetchDeployments(); }}>
+            <RefreshCw className="h-4 w-4" />
+          </Button>
           <Button variant="outline" size="icon">
             <Settings className="h-4 w-4" />
           </Button>
-          <Button onClick={handleDeploy} disabled={deploying}>
-            {deploying ? (
+          <Button onClick={handleDeploy} disabled={deployMutation.isPending}>
+            {deployMutation.isPending ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 Deploying...
@@ -299,14 +222,16 @@ export default function ProjectDetailPage() {
       {/* Deployments Tab */}
       {activeTab === 'deployments' && (
         <div className="space-y-4">
-          {displayDeployments.length === 0 ? (
+          {deployments.length === 0 ? (
             <div className="rounded-lg border bg-card p-8 text-center">
               <p className="text-muted-foreground mb-4">No deployments yet</p>
-              <Button onClick={handleDeploy}>Deploy Now</Button>
+              <Button onClick={handleDeploy} disabled={deployMutation.isPending}>
+                {deployMutation.isPending ? 'Deploying...' : 'Deploy Now'}
+              </Button>
             </div>
           ) : (
             <div className="rounded-lg border divide-y">
-              {displayDeployments.map((deployment) => {
+              {deployments.map((deployment) => {
                 const config = statusConfig[deployment.status];
                 const StatusIcon = config.icon;
 
@@ -383,19 +308,19 @@ export default function ProjectDetailPage() {
             <div className="grid gap-4 md:grid-cols-2">
               <div>
                 <p className="text-sm text-muted-foreground">Framework</p>
-                <p className="font-medium capitalize">{displayProject.framework || 'Auto-detected'}</p>
+                <p className="font-medium capitalize">{project.framework || 'Auto-detected'}</p>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Root Directory</p>
-                <p className="font-medium">{displayProject.rootDirectory}</p>
+                <p className="font-medium">{project.rootDirectory || './'}</p>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Build Command</p>
-                <p className="font-medium font-mono text-sm">{displayProject.buildCommand || 'Auto-detected'}</p>
+                <p className="font-medium font-mono text-sm">{project.buildCommand || 'Auto-detected'}</p>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Output Directory</p>
-                <p className="font-medium font-mono text-sm">{displayProject.outputDirectory || 'Auto-detected'}</p>
+                <p className="font-medium font-mono text-sm">{project.outputDirectory || 'Auto-detected'}</p>
               </div>
             </div>
           </div>
@@ -407,18 +332,18 @@ export default function ProjectDetailPage() {
               <div>
                 <p className="text-sm text-muted-foreground">Repository</p>
                 <a
-                  href={displayProject.gitUrl}
+                  href={project.gitUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="font-medium hover:text-primary flex items-center gap-1"
                 >
-                  {displayProject.gitUrl}
+                  {project.gitUrl}
                   <ExternalLink className="h-3 w-3" />
                 </a>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Production Branch</p>
-                <p className="font-medium">{displayProject.defaultBranch}</p>
+                <p className="font-medium">{project.defaultBranch}</p>
               </div>
             </div>
           </div>
@@ -429,9 +354,14 @@ export default function ProjectDetailPage() {
             <p className="text-sm text-muted-foreground">
               Once you delete a project, there is no going back. This action cannot be undone.
             </p>
-            <Button variant="destructive" className="gap-2">
+            <Button 
+              variant="destructive" 
+              className="gap-2" 
+              onClick={handleDelete}
+              disabled={deleteMutation.isPending}
+            >
               <Trash2 className="h-4 w-4" />
-              Delete Project
+              {deleteMutation.isPending ? 'Deleting...' : 'Delete Project'}
             </Button>
           </div>
         </div>

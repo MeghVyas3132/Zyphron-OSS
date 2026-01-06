@@ -1,26 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
-import { Plus, Search, MoreHorizontal, GitBranch, Globe, Clock } from 'lucide-react';
+import { Plus, Search, MoreHorizontal, GitBranch, Globe, Clock, RefreshCw, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { formatRelativeTime } from '@/lib/utils';
-
-interface Project {
-  id: string;
-  name: string;
-  slug: string;
-  framework: string;
-  gitUrl: string;
-  defaultBranch: string;
-  productionUrl: string | null;
-  lastDeployedAt: string | null;
-  createdAt: string;
-  _count?: {
-    deployments: number;
-  };
-}
+import { useProjects } from '@/hooks/use-projects';
+import type { Project } from '@/lib/api';
 
 const frameworkIcons: Record<string, string> = {
   nextjs: '▲',
@@ -28,95 +15,52 @@ const frameworkIcons: Record<string, string> = {
   vue: '💚',
   nuxt: '💚',
   svelte: '🔥',
+  sveltekit: '🔥',
   angular: '🔺',
   express: '⚡',
   fastify: '⚡',
   nestjs: '🐱',
+  flask: '🐍',
+  django: '🐍',
+  fastapi: '🐍',
+  go: '🐹',
+  rust: '🦀',
   static: '📄',
   docker: '🐳',
+  unknown: '📦',
 };
 
 export default function ProjectsPage() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const { data, isLoading, isError, error, refetch } = useProjects();
 
-  useEffect(() => {
-    const fetchProjects = async () => {
-      try {
-        const token = localStorage.getItem('auth-token');
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/projects`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          setProjects(data.data || []);
-        }
-      } catch (error) {
-        console.error('Failed to fetch projects:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchProjects();
-  }, []);
-
-  // Mock data for development
-  const mockProjects: Project[] = [
-    {
-      id: '1',
-      name: 'My Portfolio',
-      slug: 'my-portfolio',
-      framework: 'nextjs',
-      gitUrl: 'https://github.com/user/my-portfolio',
-      defaultBranch: 'main',
-      productionUrl: 'https://my-portfolio.zyphron.app',
-      lastDeployedAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
-      createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7).toISOString(),
-      _count: { deployments: 45 },
-    },
-    {
-      id: '2',
-      name: 'API Server',
-      slug: 'api-server',
-      framework: 'express',
-      gitUrl: 'https://github.com/user/api-server',
-      defaultBranch: 'main',
-      productionUrl: 'https://api-server.zyphron.app',
-      lastDeployedAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(),
-      createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 14).toISOString(),
-      _count: { deployments: 123 },
-    },
-    {
-      id: '3',
-      name: 'E-commerce App',
-      slug: 'ecommerce-app',
-      framework: 'react',
-      gitUrl: 'https://github.com/user/ecommerce-app',
-      defaultBranch: 'develop',
-      productionUrl: null,
-      lastDeployedAt: null,
-      createdAt: new Date(Date.now() - 1000 * 60 * 60).toISOString(),
-      _count: { deployments: 0 },
-    },
-  ];
-
-  const displayProjects = projects.length > 0 ? projects : mockProjects;
+  const projects = data?.data || [];
   
-  const filteredProjects = displayProjects.filter(
+  const filteredProjects = projects.filter(
     (project) =>
       project.name.toLowerCase().includes(search.toLowerCase()) ||
       project.slug.toLowerCase().includes(search.toLowerCase())
   );
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 gap-4">
+        <AlertCircle className="h-12 w-12 text-destructive" />
+        <p className="text-muted-foreground">
+          {error instanceof Error ? error.message : 'Failed to load projects'}
+        </p>
+        <Button onClick={() => refetch()} variant="outline" className="gap-2">
+          <RefreshCw className="h-4 w-4" />
+          Retry
+        </Button>
       </div>
     );
   }
@@ -131,12 +75,17 @@ export default function ProjectsPage() {
             Manage and deploy your applications
           </p>
         </div>
-        <Link href="/projects/new">
-          <Button className="gap-2">
-            <Plus className="h-4 w-4" />
-            New Project
+        <div className="flex gap-2">
+          <Button onClick={() => refetch()} variant="outline" size="icon">
+            <RefreshCw className="h-4 w-4" />
           </Button>
-        </Link>
+          <Link href="/projects/new">
+            <Button className="gap-2">
+              <Plus className="h-4 w-4" />
+              New Project
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {/* Search */}
@@ -174,7 +123,7 @@ export default function ProjectsPage() {
 }
 
 function ProjectCard({ project }: { project: Project }) {
-  const frameworkIcon = frameworkIcons[project.framework] || '📦';
+  const frameworkIcon = frameworkIcons[project.framework || 'unknown'] || '📦';
 
   return (
     <Link href={`/projects/${project.slug}`}>
@@ -189,7 +138,7 @@ function ProjectCard({ project }: { project: Project }) {
               <p className="text-sm text-muted-foreground">{project.slug}</p>
             </div>
           </div>
-          <Button variant="ghost" size="icon" className="h-8 w-8">
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => e.preventDefault()}>
             <MoreHorizontal className="h-4 w-4" />
           </Button>
         </div>
@@ -197,13 +146,13 @@ function ProjectCard({ project }: { project: Project }) {
         <div className="mt-4 space-y-2">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <GitBranch className="h-4 w-4" />
-            <span>{project.defaultBranch}</span>
+            <span>{project.defaultBranch || 'main'}</span>
           </div>
 
           {project.productionUrl && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Globe className="h-4 w-4" />
-              <span className="truncate">{project.productionUrl.replace('https://', '')}</span>
+              <span className="truncate">{project.productionUrl.replace('https://', '').replace('http://', '')}</span>
             </div>
           )}
 

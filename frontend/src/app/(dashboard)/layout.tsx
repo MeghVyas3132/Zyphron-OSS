@@ -8,7 +8,6 @@ import {
   FolderKanban, 
   Database, 
   Settings, 
-  LogOut,
   Zap,
   ChevronLeft,
   ChevronRight,
@@ -41,17 +40,11 @@ export default function DashboardLayout({
 
   useEffect(() => {
     setMounted(true);
-    // Check auth
-    const token = localStorage.getItem('auth-token');
-    if (!token) {
-      router.push('/login');
+    // Set a mock token for development (skip auth)
+    if (!localStorage.getItem('auth-token')) {
+      localStorage.setItem('auth-token', 'dev-token');
     }
-  }, [router]);
-
-  const handleLogout = () => {
-    localStorage.removeItem('auth-token');
-    router.push('/login');
-  };
+  }, []);
 
   if (!mounted) {
     return null;
@@ -119,14 +112,6 @@ export default function DashboardLayout({
                 <Moon className="h-5 w-5" />
               )}
               {!collapsed && <span>{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>}
-            </Button>
-            <Button
-              variant="ghost"
-              className={cn('w-full justify-start gap-3 text-destructive hover:text-destructive', collapsed && 'justify-center px-2')}
-              onClick={handleLogout}
-            >
-              <LogOut className="h-5 w-5" />
-              {!collapsed && <span>Logout</span>}
             </Button>
           </div>
         </div>

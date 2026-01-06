@@ -1,6 +1,5 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { 
   ArrowUpRight,
@@ -12,146 +11,104 @@ import {
   Activity,
   Server,
   Database,
-  FolderKanban
+  FolderKanban,
+  RefreshCw,
+  AlertCircle
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { formatRelativeTime } from '@/lib/utils';
-
-interface DashboardStats {
-  totalProjects: number;
-  activeDeployments: number;
-  totalDatabases: number;
-  deploymentsToday: number;
-  successRate: number;
-}
+import { useDashboardMetrics } from '@/hooks/use-dashboard';
 
 interface RecentDeployment {
   id: string;
   projectName: string;
   projectSlug: string;
-  status: 'PENDING' | 'BUILDING' | 'DEPLOYING' | 'READY' | 'FAILED' | 'CANCELLED';
+  status: 'QUEUED' | 'PENDING' | 'BUILDING' | 'DEPLOYING' | 'LIVE' | 'READY' | 'FAILED' | 'CANCELLED' | 'ROLLING_BACK';
   createdAt: string;
-  branch: string;
-  commitSha: string;
+  branch?: string;
+  commitSha?: string;
 }
 
 const statusConfig = {
+  QUEUED: { icon: Clock, color: 'text-yellow-500', bg: 'bg-yellow-500/10' },
   PENDING: { icon: Clock, color: 'text-yellow-500', bg: 'bg-yellow-500/10' },
   BUILDING: { icon: Loader2, color: 'text-blue-500', bg: 'bg-blue-500/10', animate: true },
   DEPLOYING: { icon: Loader2, color: 'text-blue-500', bg: 'bg-blue-500/10', animate: true },
+  LIVE: { icon: CheckCircle2, color: 'text-green-500', bg: 'bg-green-500/10' },
   READY: { icon: CheckCircle2, color: 'text-green-500', bg: 'bg-green-500/10' },
   FAILED: { icon: XCircle, color: 'text-red-500', bg: 'bg-red-500/10' },
   CANCELLED: { icon: XCircle, color: 'text-gray-500', bg: 'bg-gray-500/10' },
+  ROLLING_BACK: { icon: Loader2, color: 'text-orange-500', bg: 'bg-orange-500/10', animate: true },
 };
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [recentDeployments, setRecentDeployments] = useState<RecentDeployment[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data, isLoading, isError, error, refetch } = useDashboardMetrics();
 
-  useEffect(() => {
-    // Fetch dashboard data
-    const fetchDashboard = async () => {
-      try {
-        const token = localStorage.getItem('auth-token');
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/dashboard/metrics`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-        
-        if (response.ok) {
-          const data = await response.json();
-          setStats(data.data.overview);
-          setRecentDeployments(data.data.recentActivity || []);
-        }
-      } catch (error) {
-        console.error('Failed to fetch dashboard:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
+  const metrics = data?.data;
+  const overview = metrics?.overview;
+  const recentActivity = (metrics?.recentActivity || []) as RecentDeployment[];
 
-    fetchDashboard();
-  }, []);
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
 
-  // Mock data for now
-  const mockStats: DashboardStats = {
-    totalProjects: 12,
-    activeDeployments: 8,
-    totalDatabases: 5,
-    deploymentsToday: 23,
-    successRate: 96.5,
-  };
-
-  const mockDeployments: RecentDeployment[] = [
-    {
-      id: '1',
-      projectName: 'My Website',
-      projectSlug: 'my-website',
-      status: 'READY',
-      createdAt: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
-      branch: 'main',
-      commitSha: 'abc1234',
-    },
-    {
-      id: '2',
-      projectName: 'API Server',
-      projectSlug: 'api-server',
-      status: 'BUILDING',
-      createdAt: new Date(Date.now() - 1000 * 60 * 2).toISOString(),
-      branch: 'feature/auth',
-      commitSha: 'def5678',
-    },
-    {
-      id: '3',
-      projectName: 'Mobile Backend',
-      projectSlug: 'mobile-backend',
-      status: 'FAILED',
-      createdAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
-      branch: 'main',
-      commitSha: 'ghi9012',
-    },
-  ];
-
-  const displayStats = stats || mockStats;
-  const displayDeployments = recentDeployments.length > 0 ? recentDeployments : mockDeployments;
+  if (isError) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 gap-4">
+        <AlertCircle className="h-12 w-12 text-destructive" />
+        <p className="text-muted-foreground">
+          {error instanceof Error ? error.message : 'Failed to load dashboard'}
+        </p>
+        <Button onClick={() => refetch()} variant="outline" className="gap-2">
+          <RefreshCw className="h-4 w-4" />
+          Retry
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold">Dashboard</h1>
-        <p className="text-muted-foreground mt-1">
-          Welcome back! Here's an overview of your projects.
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Dashboard</h1>
+          <p className="text-muted-foreground mt-1">
+            Welcome back! Here's an overview of your projects.
+          </p>
+        </div>
+        <Button onClick={() => refetch()} variant="outline" size="icon">
+          <RefreshCw className="h-4 w-4" />
+        </Button>
       </div>
 
       {/* Stats Grid */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatCard
           title="Total Projects"
-          value={displayStats.totalProjects}
+          value={overview?.totalProjects || 0}
           icon={FolderKanban}
           href="/projects"
         />
         <StatCard
           title="Active Deployments"
-          value={displayStats.activeDeployments}
+          value={overview?.activeDeployments || 0}
           icon={Server}
-          trend={{ value: 12, positive: true }}
         />
         <StatCard
           title="Databases"
-          value={displayStats.totalDatabases}
+          value={overview?.totalDatabases || 0}
           icon={Database}
           href="/databases"
         />
         <StatCard
           title="Success Rate"
-          value={`${displayStats.successRate}%`}
+          value={`${metrics?.deployments?.successRate?.toFixed(1) || 0}%`}
           icon={Activity}
-          trend={{ value: 2.5, positive: true }}
         />
       </div>
 
@@ -167,7 +124,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="rounded-lg border bg-card">
-          {displayDeployments.length === 0 ? (
+          {recentActivity.length === 0 ? (
             <div className="p-8 text-center">
               <p className="text-muted-foreground">No deployments yet</p>
               <Link href="/projects/new">
@@ -176,14 +133,14 @@ export default function DashboardPage() {
             </div>
           ) : (
             <div className="divide-y">
-              {displayDeployments.map((deployment) => {
-                const config = statusConfig[deployment.status];
+              {recentActivity.map((deployment) => {
+                const config = statusConfig[deployment.status] || statusConfig.PENDING;
                 const StatusIcon = config.icon;
 
                 return (
                   <Link
                     key={deployment.id}
-                    href={`/projects/${deployment.projectSlug}/deployments/${deployment.id}`}
+                    href={`/projects/${deployment.projectSlug}`}
                     className="flex items-center justify-between p-4 hover:bg-muted/50 transition-colors"
                   >
                     <div className="flex items-center gap-4">
@@ -196,12 +153,18 @@ export default function DashboardPage() {
                       </div>
                       <div>
                         <p className="font-medium">{deployment.projectName}</p>
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <GitBranch className="h-3 w-3" />
-                          <span>{deployment.branch}</span>
-                          <span>·</span>
-                          <span>{deployment.commitSha.slice(0, 7)}</span>
-                        </div>
+                        {deployment.branch && (
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <GitBranch className="h-3 w-3" />
+                            <span>{deployment.branch}</span>
+                            {deployment.commitSha && (
+                              <>
+                                <span>·</span>
+                                <span>{deployment.commitSha.slice(0, 7)}</span>
+                              </>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div className="text-sm text-muted-foreground">

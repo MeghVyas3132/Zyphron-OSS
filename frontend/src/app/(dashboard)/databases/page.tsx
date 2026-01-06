@@ -1,28 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
-import { Plus, Search, Database, MoreHorizontal, ExternalLink, Clock, CheckCircle2, Loader2 } from 'lucide-react';
+import { Plus, Search, Database, MoreHorizontal, ExternalLink, Clock, CheckCircle2, Loader2, RefreshCw, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { formatRelativeTime } from '@/lib/utils';
-
-interface DatabaseInstance {
-  id: string;
-  name: string;
-  slug: string;
-  type: 'POSTGRESQL' | 'MYSQL' | 'MONGODB' | 'REDIS';
-  version: string;
-  status: 'CREATING' | 'RUNNING' | 'STOPPED' | 'FAILED';
-  host: string;
-  port: number;
-  databaseName: string;
-  createdAt: string;
-  storage: {
-    used: number;
-    total: number;
-  };
-}
+import { useDatabases } from '@/hooks/use-databases';
+import type { DatabaseInstance } from '@/lib/api';
 
 const dbTypeConfig = {
   POSTGRESQL: { icon: '🐘', color: 'text-blue-500', label: 'PostgreSQL' },
@@ -39,89 +24,36 @@ const statusConfig = {
 };
 
 export default function DatabasesPage() {
-  const [databases, setDatabases] = useState<DatabaseInstance[]>([]);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const { data, isLoading, isError, error, refetch } = useDatabases();
 
-  useEffect(() => {
-    const fetchDatabases = async () => {
-      try {
-        const token = localStorage.getItem('auth-token');
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/databases`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          setDatabases(data.data || []);
-        }
-      } catch (error) {
-        console.error('Failed to fetch databases:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchDatabases();
-  }, []);
-
-  // Mock data for development
-  const mockDatabases: DatabaseInstance[] = [
-    {
-      id: '1',
-      name: 'Production DB',
-      slug: 'production-db',
-      type: 'POSTGRESQL',
-      version: '15.2',
-      status: 'RUNNING',
-      host: 'db-prod.zyphron.app',
-      port: 5432,
-      databaseName: 'app_production',
-      createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 30).toISOString(),
-      storage: { used: 2.4, total: 10 },
-    },
-    {
-      id: '2',
-      name: 'Cache Server',
-      slug: 'cache-server',
-      type: 'REDIS',
-      version: '7.0',
-      status: 'RUNNING',
-      host: 'redis-prod.zyphron.app',
-      port: 6379,
-      databaseName: '0',
-      createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 14).toISOString(),
-      storage: { used: 0.5, total: 1 },
-    },
-    {
-      id: '3',
-      name: 'Analytics DB',
-      slug: 'analytics-db',
-      type: 'MONGODB',
-      version: '6.0',
-      status: 'CREATING',
-      host: 'mongo-analytics.zyphron.app',
-      port: 27017,
-      databaseName: 'analytics',
-      createdAt: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
-      storage: { used: 0, total: 20 },
-    },
-  ];
-
-  const displayDatabases = databases.length > 0 ? databases : mockDatabases;
+  const databases = data?.data || [];
   
-  const filteredDatabases = displayDatabases.filter(
+  const filteredDatabases = databases.filter(
     (db) =>
       db.name.toLowerCase().includes(search.toLowerCase()) ||
       db.slug.toLowerCase().includes(search.toLowerCase())
   );
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 gap-4">
+        <AlertCircle className="h-12 w-12 text-destructive" />
+        <p className="text-muted-foreground">
+          {error instanceof Error ? error.message : 'Failed to load databases'}
+        </p>
+        <Button onClick={() => refetch()} variant="outline" className="gap-2">
+          <RefreshCw className="h-4 w-4" />
+          Retry
+        </Button>
       </div>
     );
   }
@@ -136,12 +68,17 @@ export default function DatabasesPage() {
             Provision and manage your databases
           </p>
         </div>
-        <Link href="/databases/new">
-          <Button className="gap-2">
-            <Plus className="h-4 w-4" />
-            New Database
+        <div className="flex gap-2">
+          <Button onClick={() => refetch()} variant="outline" size="icon">
+            <RefreshCw className="h-4 w-4" />
           </Button>
-        </Link>
+          <Link href="/databases/new">
+            <Button className="gap-2">
+              <Plus className="h-4 w-4" />
+              New Database
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {/* Search */}
