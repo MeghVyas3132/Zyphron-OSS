@@ -51,7 +51,7 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
   app.get('/projects/:projectId/domains', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { projectId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { projectId } = request.params;
 
     // Check project access
@@ -95,7 +95,7 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
   app.post('/projects/:projectId/domains', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { projectId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { projectId } = request.params;
 
     const parseResult = addDomainSchema.safeParse(request.body);
@@ -198,7 +198,7 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
   app.post('/projects/:projectId/domains/:domain/verify', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { projectId: string; domain: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { projectId, domain } = request.params;
 
     // Check project access
@@ -296,7 +296,7 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
   app.delete('/projects/:projectId/domains/:domain', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { projectId: string; domain: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { projectId, domain } = request.params;
 
     // Check project access
@@ -344,7 +344,7 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
   app.get('/projects/:projectId/domains/:domain/status', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { projectId: string; domain: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { projectId, domain } = request.params;
 
     // Check project access
@@ -400,7 +400,7 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
   app.post('/projects/:projectId/domains/:domain/primary', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { projectId: string; domain: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { projectId, domain } = request.params;
 
     // Check project access

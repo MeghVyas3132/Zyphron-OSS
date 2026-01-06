@@ -55,7 +55,7 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
   app.get('/', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const query = querySchema.parse(request.query);
 
     const where = {
@@ -122,7 +122,7 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
   app.post('/', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const parseResult = createProjectSchema.safeParse(request.body);
 
     if (!parseResult.success) {
@@ -176,12 +176,15 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
 
       logger.info({ projectId: project.id, userId }, 'Project created');
 
+      const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
+      const baseDomain = process.env.BASE_DOMAIN || 'localhost';
+      
       return reply.status(201).send({
         success: true,
         data: {
           project: {
             ...project,
-            url: `https://${subdomain}.${process.env.BASE_DOMAIN || 'localhost'}`,
+            url: `${protocol}://${subdomain}.${baseDomain}`,
           },
         },
       });
@@ -203,7 +206,7 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
   app.get('/:projectId', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { projectId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { projectId } = request.params;
 
     const project = await prisma.project.findFirst({
@@ -260,7 +263,7 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
   app.put('/:projectId', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { projectId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { projectId } = request.params;
     
     const parseResult = updateProjectSchema.safeParse(request.body);
@@ -314,7 +317,7 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
   app.delete('/:projectId', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { projectId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { projectId } = request.params;
 
     // Check access (only owner can delete)

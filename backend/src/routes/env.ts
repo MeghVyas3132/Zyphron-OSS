@@ -84,7 +84,7 @@ export async function envRoutes(app: FastifyInstance): Promise<void> {
   app.get('/projects/:projectId/env', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { projectId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { projectId } = request.params;
 
     // Check project access
@@ -141,7 +141,7 @@ export async function envRoutes(app: FastifyInstance): Promise<void> {
   app.post('/projects/:projectId/env', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { projectId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { projectId } = request.params;
     
     const parseResult = createEnvSchema.safeParse(request.body);
@@ -231,7 +231,7 @@ export async function envRoutes(app: FastifyInstance): Promise<void> {
   app.post('/projects/:projectId/env/bulk', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { projectId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { projectId } = request.params;
     
     const parseResult = bulkCreateSchema.safeParse(request.body);
@@ -384,7 +384,7 @@ export async function envRoutes(app: FastifyInstance): Promise<void> {
   app.put('/projects/:projectId/env/:envId', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { projectId: string; envId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { projectId, envId } = request.params;
     
     const parseResult = updateEnvSchema.safeParse(request.body);
@@ -471,7 +471,7 @@ export async function envRoutes(app: FastifyInstance): Promise<void> {
   app.delete('/projects/:projectId/env/:envId', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { projectId: string; envId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { projectId, envId } = request.params;
 
     // Check project access
@@ -528,7 +528,7 @@ export async function envRoutes(app: FastifyInstance): Promise<void> {
   app.get('/projects/:projectId/env/export', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { projectId: string }; Querystring: { environment: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { projectId } = request.params;
     const { environment } = request.query as { environment?: string };
 

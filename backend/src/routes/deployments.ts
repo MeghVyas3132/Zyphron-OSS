@@ -1,667 +1,320 @@
-// ===========================================
-// DEPLOYMENT ROUTES
-// ===========================================
-
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma.js';
 import { createLogger } from '@/lib/logger.js';
-import { redis, publishEvent } from '@/lib/redis.js';
-import { producer } from '@/lib/kafka.js';
+import { getRedisClient, publishEvent } from '@/lib/redis.js';
+import { sendDeploymentEvent } from '@/lib/kafka.js';
 
 const logger = createLogger('deployments');
-
-// ===========================================
-// VALIDATION SCHEMAS
-// ===========================================
 
 const triggerDeploymentSchema = z.object({
   branch: z.string().optional(),
   commitSha: z.string().optional(),
-  environment: z.enum(['production', 'preview', 'staging']).default('production'),
+  environment: z.enum(['PRODUCTION', 'PREVIEW', 'STAGING', 'DEVELOPMENT']).default('PRODUCTION'),
   force: z.boolean().default(false),
+  serviceIds: z.array(z.string()).optional(),
 });
 
-const querySchema = z.object({
+const deploymentQuerySchema = z.object({
   page: z.coerce.number().min(1).default(1),
   limit: z.coerce.number().min(1).max(100).default(20),
-  status: z.enum(['PENDING', 'BUILDING', 'DEPLOYING', 'READY', 'FAILED', 'CANCELLED']).optional(),
-  environment: z.enum(['production', 'preview', 'staging']).optional(),
+  status: z.enum(['QUEUED', 'BUILDING', 'DEPLOYING', 'LIVE', 'FAILED', 'CANCELLED', 'ROLLING_BACK']).optional(),
+  environment: z.enum(['PRODUCTION', 'PREVIEW', 'STAGING', 'DEVELOPMENT']).optional(),
 });
 
-const cancelDeploymentSchema = z.object({
-  reason: z.string().optional(),
+const rollbackSchema = z.object({
+  targetDeploymentId: z.string(),
 });
-
-// ===========================================
-// ROUTES
-// ===========================================
 
 export async function deploymentRoutes(app: FastifyInstance): Promise<void> {
-  // List deployments for a project
+  const redis = getRedisClient();
+
   app.get('/projects/:projectId/deployments', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { projectId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { projectId } = request.params;
-    const query = querySchema.parse(request.query);
+    const query = deploymentQuerySchema.parse(request.query);
 
-    // Check project access
     const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        OR: [
-          { userId },
-          { team: { members: { some: { userId } } } },
-        ],
-      },
+      where: { id: projectId, userId },
     });
 
     if (!project) {
-      return reply.status(404).send({
-        success: false,
-        error: {
-          code: 'PROJECT_NOT_FOUND',
-          message: 'Project not found or you do not have access',
-        },
-      });
+      return reply.status(404).send({ error: 'Project not found' });
     }
 
-    const where = {
-      projectId,
-      ...(query.status && { status: query.status }),
-      ...(query.environment && { environment: query.environment }),
-    };
+    const skip = (query.page - 1) * query.limit;
+    const where: Record<string, unknown> = { projectId };
+    if (query.status) where.status = query.status;
+    if (query.environment) where.environment = query.environment;
 
     const [deployments, total] = await Promise.all([
       prisma.deployment.findMany({
         where,
-        skip: (query.page - 1) * query.limit,
+        skip,
         take: query.limit,
         orderBy: { createdAt: 'desc' },
         include: {
-          build: {
-            select: {
-              id: true,
-              status: true,
-              duration: true,
-            },
-          },
+          buildJob: true,
+          serviceDeployments: { include: { service: true } },
         },
       }),
       prisma.deployment.count({ where }),
     ]);
 
     return reply.send({
-      success: true,
-      data: { deployments },
-      meta: {
-        pagination: {
-          page: query.page,
-          limit: query.limit,
-          total,
-          totalPages: Math.ceil(total / query.limit),
-          hasNext: query.page * query.limit < total,
-          hasPrev: query.page > 1,
-        },
-      },
+      deployments,
+      pagination: { page: query.page, limit: query.limit, total, totalPages: Math.ceil(total / query.limit) },
     });
   });
 
-  // Trigger new deployment
   app.post('/projects/:projectId/deployments', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { projectId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
+    const userId = request.user?.id as string;
     const { projectId } = request.params;
-    
-    const parseResult = triggerDeploymentSchema.safeParse(request.body);
+    const body = triggerDeploymentSchema.parse(request.body);
 
-    if (!parseResult.success) {
-      return reply.status(400).send({
-        success: false,
-        error: {
-          code: 'VALIDATION_ERROR',
-          message: 'Invalid request body',
-          details: parseResult.error.flatten(),
-        },
-      });
-    }
-
-    const data = parseResult.data;
-
-    // Check project access
     const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        OR: [
-          { userId },
-          { team: { members: { some: { userId, role: { in: ['OWNER', 'ADMIN', 'DEVELOPER'] } } } } },
-        ],
-      },
+      where: { id: projectId, userId },
+      include: { services: true, envVariables: true },
     });
 
     if (!project) {
-      return reply.status(404).send({
-        success: false,
-        error: {
-          code: 'PROJECT_NOT_FOUND',
-          message: 'Project not found or you do not have permission to deploy',
-        },
-      });
+      return reply.status(404).send({ error: 'Project not found' });
     }
 
-    // Check for existing deployment in progress
-    if (!data.force) {
-      const activeDeployment = await prisma.deployment.findFirst({
-        where: {
-          projectId,
-          status: { in: ['PENDING', 'BUILDING', 'DEPLOYING'] },
-        },
+    if (!body.force) {
+      const active = await prisma.deployment.findFirst({
+        where: { projectId, status: { in: ['QUEUED', 'BUILDING', 'DEPLOYING'] } },
       });
-
-      if (activeDeployment) {
-        return reply.status(409).send({
-          success: false,
-          error: {
-            code: 'DEPLOYMENT_IN_PROGRESS',
-            message: 'A deployment is already in progress. Use force=true to override.',
-            details: { activeDeploymentId: activeDeployment.id },
-          },
-        });
+      if (active) {
+        return reply.status(409).send({ error: 'Active deployment in progress', deploymentId: active.id });
       }
     }
 
-    // Create deployment record
     const deployment = await prisma.deployment.create({
       data: {
         projectId,
         userId,
-        branch: data.branch || project.branch,
-        commitSha: data.commitSha,
-        environment: data.environment,
-        status: 'PENDING',
-        url: `https://${project.subdomain}-${data.environment === 'production' ? '' : data.environment + '-'}${process.env.BASE_DOMAIN || 'localhost'}`,
+        status: 'QUEUED',
+        environment: body.environment,
+        branch: body.branch || project.branch || 'main',
+        commitSha: body.commitSha,
+        trigger: 'MANUAL',
       },
     });
 
-    // Create associated build record
-    const build = await prisma.build.create({
-      data: {
+    await prisma.buildJob.create({
+      data: { deploymentId: deployment.id, status: 'PENDING' },
+    });
+
+    const servicesToDeploy = body.serviceIds 
+      ? project.services.filter(s => body.serviceIds!.includes(s.id))
+      : project.services;
+
+    if (servicesToDeploy.length > 0) {
+      await prisma.serviceDeployment.createMany({
+        data: servicesToDeploy.map(service => ({
+          deploymentId: deployment.id,
+          serviceId: service.id,
+          status: 'PENDING',
+        })),
+      });
+    }
+
+    try {
+      await sendDeploymentEvent(deployment.id, 'DEPLOYMENT_CREATED', {
         deploymentId: deployment.id,
         projectId,
-        status: 'PENDING',
-      },
-    });
-
-    // Publish deployment event to Kafka
-    await producer.send({
-      topic: 'deployment-events',
-      messages: [{
-        key: projectId,
-        value: JSON.stringify({
-          type: 'DEPLOYMENT_CREATED',
-          deploymentId: deployment.id,
-          buildId: build.id,
-          projectId,
-          userId,
-          environment: data.environment,
-          branch: data.branch || project.branch,
-          timestamp: new Date().toISOString(),
-        }),
-      }],
-    });
-
-    // Publish real-time update via Redis
-    await publishEvent('deployments', {
-      type: 'DEPLOYMENT_STARTED',
-      deploymentId: deployment.id,
-      projectId,
-    });
-
-    logger.info({
-      deploymentId: deployment.id,
-      projectId,
-      userId,
-      environment: data.environment,
-    }, 'Deployment triggered');
-
-    return reply.status(201).send({
-      success: true,
-      data: {
-        deployment: {
-          ...deployment,
-          build,
-        },
-      },
-    });
-  });
-
-  // Get single deployment
-  app.get('/deployments/:deploymentId', {
-    onRequest: [app.authenticate],
-  }, async (request: FastifyRequest<{ Params: { deploymentId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
-    const { deploymentId } = request.params;
-
-    const deployment = await prisma.deployment.findFirst({
-      where: {
-        id: deploymentId,
-        project: {
-          OR: [
-            { userId },
-            { team: { members: { some: { userId } } } },
-          ],
-        },
-      },
-      include: {
-        project: {
-          select: {
-            id: true,
-            name: true,
-            subdomain: true,
-            repositoryUrl: true,
-          },
-        },
-        build: true,
-        user: {
-          select: {
-            id: true,
-            username: true,
-            avatarUrl: true,
-          },
-        },
-      },
-    });
-
-    if (!deployment) {
-      return reply.status(404).send({
-        success: false,
-        error: {
-          code: 'DEPLOYMENT_NOT_FOUND',
-          message: 'Deployment not found or you do not have access',
-        },
-      });
-    }
-
-    return reply.send({
-      success: true,
-      data: { deployment },
-    });
-  });
-
-  // Cancel deployment
-  app.post('/deployments/:deploymentId/cancel', {
-    onRequest: [app.authenticate],
-  }, async (request: FastifyRequest<{ Params: { deploymentId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
-    const { deploymentId } = request.params;
-    
-    const parseResult = cancelDeploymentSchema.safeParse(request.body);
-    const data = parseResult.success ? parseResult.data : {};
-
-    const deployment = await prisma.deployment.findFirst({
-      where: {
-        id: deploymentId,
-        status: { in: ['PENDING', 'BUILDING', 'DEPLOYING'] },
-        project: {
-          OR: [
-            { userId },
-            { team: { members: { some: { userId, role: { in: ['OWNER', 'ADMIN', 'DEVELOPER'] } } } } },
-          ],
-        },
-      },
-    });
-
-    if (!deployment) {
-      return reply.status(404).send({
-        success: false,
-        error: {
-          code: 'DEPLOYMENT_NOT_FOUND',
-          message: 'Deployment not found, already completed, or you do not have permission',
-        },
-      });
-    }
-
-    // Update deployment status
-    const updatedDeployment = await prisma.deployment.update({
-      where: { id: deploymentId },
-      data: {
-        status: 'CANCELLED',
-        finishedAt: new Date(),
-      },
-    });
-
-    // Update build status if exists
-    await prisma.build.updateMany({
-      where: {
-        deploymentId,
-        status: { in: ['PENDING', 'BUILDING'] },
-      },
-      data: {
-        status: 'CANCELLED',
-        finishedAt: new Date(),
-      },
-    });
-
-    // Publish cancellation event
-    await producer.send({
-      topic: 'deployment-events',
-      messages: [{
-        key: deployment.projectId,
-        value: JSON.stringify({
-          type: 'DEPLOYMENT_CANCELLED',
-          deploymentId,
-          projectId: deployment.projectId,
-          userId,
-          reason: data.reason,
-          timestamp: new Date().toISOString(),
-        }),
-      }],
-    });
-
-    await publishEvent('deployments', {
-      type: 'DEPLOYMENT_CANCELLED',
-      deploymentId,
-      projectId: deployment.projectId,
-    });
-
-    logger.info({ deploymentId, userId, reason: data.reason }, 'Deployment cancelled');
-
-    return reply.send({
-      success: true,
-      data: { deployment: updatedDeployment },
-    });
-  });
-
-  // Redeploy (create new deployment from existing)
-  app.post('/deployments/:deploymentId/redeploy', {
-    onRequest: [app.authenticate],
-  }, async (request: FastifyRequest<{ Params: { deploymentId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
-    const { deploymentId } = request.params;
-
-    const originalDeployment = await prisma.deployment.findFirst({
-      where: {
-        id: deploymentId,
-        project: {
-          OR: [
-            { userId },
-            { team: { members: { some: { userId, role: { in: ['OWNER', 'ADMIN', 'DEVELOPER'] } } } } },
-          ],
-        },
-      },
-      include: {
-        project: true,
-      },
-    });
-
-    if (!originalDeployment) {
-      return reply.status(404).send({
-        success: false,
-        error: {
-          code: 'DEPLOYMENT_NOT_FOUND',
-          message: 'Deployment not found or you do not have permission',
-        },
-      });
-    }
-
-    // Create new deployment based on original
-    const newDeployment = await prisma.deployment.create({
-      data: {
-        projectId: originalDeployment.projectId,
         userId,
-        branch: originalDeployment.branch,
-        commitSha: originalDeployment.commitSha,
-        environment: originalDeployment.environment,
-        status: 'PENDING',
-        url: originalDeployment.url,
-      },
-    });
-
-    const build = await prisma.build.create({
-      data: {
-        deploymentId: newDeployment.id,
-        projectId: originalDeployment.projectId,
-        status: 'PENDING',
-      },
-    });
-
-    // Publish events
-    await producer.send({
-      topic: 'deployment-events',
-      messages: [{
-        key: originalDeployment.projectId,
-        value: JSON.stringify({
-          type: 'DEPLOYMENT_CREATED',
-          deploymentId: newDeployment.id,
-          buildId: build.id,
-          projectId: originalDeployment.projectId,
-          userId,
-          environment: originalDeployment.environment,
-          branch: originalDeployment.branch,
-          redeployedFrom: deploymentId,
-          timestamp: new Date().toISOString(),
-        }),
-      }],
-    });
-
-    await publishEvent('deployments', {
-      type: 'DEPLOYMENT_STARTED',
-      deploymentId: newDeployment.id,
-      projectId: originalDeployment.projectId,
-    });
-
-    logger.info({
-      deploymentId: newDeployment.id,
-      originalDeploymentId: deploymentId,
-      projectId: originalDeployment.projectId,
-      userId,
-    }, 'Redeployment triggered');
-
-    return reply.status(201).send({
-      success: true,
-      data: {
-        deployment: {
-          ...newDeployment,
-          build,
-        },
-      },
-    });
-  });
-
-  // Rollback to a previous deployment (uses existing image - instant)
-  app.post('/deployments/:deploymentId/rollback', {
-    onRequest: [app.authenticate],
-  }, async (request: FastifyRequest<{ Params: { deploymentId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
-    const { deploymentId } = request.params;
-
-    const targetDeployment = await prisma.deployment.findFirst({
-      where: {
-        id: deploymentId,
-        status: 'READY',
-        project: {
-          OR: [
-            { userId },
-            { team: { members: { some: { userId, role: { in: ['OWNER', 'ADMIN', 'DEVELOPER'] } } } } },
-          ],
-        },
-      },
-      include: {
-        project: true,
-        build: true,
-      },
-    });
-
-    if (!targetDeployment) {
-      return reply.status(404).send({
-        success: false,
-        error: {
-          code: 'DEPLOYMENT_NOT_FOUND',
-          message: 'Deployment not found, not successful, or you do not have permission',
-        },
+        environment: body.environment,
+        branch: body.branch || project.branch || 'main',
+        repositoryUrl: project.repositoryUrl,
       });
+    } catch (err) {
+      logger.error('Failed to send Kafka event', { error: err });
     }
 
-    if (!targetDeployment.imageTag) {
-      return reply.status(400).send({
-        success: false,
-        error: {
-          code: 'NO_IMAGE',
-          message: 'Target deployment has no image to rollback to',
-        },
-      });
-    }
+    await publishEvent('deployment:created', { deploymentId: deployment.id, status: 'QUEUED' });
 
-    // Create rollback deployment (reuses existing image)
-    const rollbackDeployment = await prisma.deployment.create({
+    await prisma.auditLog.create({
       data: {
-        projectId: targetDeployment.projectId,
         userId,
-        branch: targetDeployment.branch,
-        commitSha: targetDeployment.commitSha,
-        commitMessage: `Rollback to deployment ${deploymentId.slice(0, 8)}`,
-        environment: targetDeployment.environment,
-        status: 'DEPLOYING',
-        imageTag: targetDeployment.imageTag,
-        url: targetDeployment.url,
+        action: 'DEPLOYMENT_TRIGGERED',
+        resourceType: 'Deployment',
+        resourceId: deployment.id,
+        metadata: { projectId, environment: body.environment },
       },
     });
 
-    // Publish rollback event (skip build, go straight to deploy)
-    await producer.send({
-      topic: 'deployment-events',
-      messages: [{
-        key: targetDeployment.projectId,
-        value: JSON.stringify({
-          type: 'DEPLOYMENT_ROLLBACK',
-          deploymentId: rollbackDeployment.id,
-          projectId: targetDeployment.projectId,
-          userId,
-          environment: targetDeployment.environment,
-          imageTag: targetDeployment.imageTag,
-          rollbackFrom: deploymentId,
-          timestamp: new Date().toISOString(),
-        }),
-      }],
+    const full = await prisma.deployment.findUnique({
+      where: { id: deployment.id },
+      include: { buildJob: true, serviceDeployments: { include: { service: true } } },
     });
 
-    await publishEvent('deployments', {
-      type: 'DEPLOYMENT_ROLLBACK',
-      deploymentId: rollbackDeployment.id,
-      projectId: targetDeployment.projectId,
-      targetDeploymentId: deploymentId,
-    });
-
-    logger.info({
-      rollbackDeploymentId: rollbackDeployment.id,
-      targetDeploymentId: deploymentId,
-      projectId: targetDeployment.projectId,
-      imageTag: targetDeployment.imageTag,
-      userId,
-    }, 'Rollback initiated');
-
-    return reply.status(201).send({
-      success: true,
-      data: {
-        deployment: rollbackDeployment,
-        message: 'Rollback initiated, using existing image for instant deployment',
-      },
-    });
+    logger.info('Deployment triggered', { deploymentId: deployment.id });
+    return reply.status(201).send({ deployment: full });
   });
 
-  // Get deployment logs
-  app.get('/deployments/:deploymentId/logs', {
+  app.get('/deployments/:id', {
     onRequest: [app.authenticate],
-  }, async (request: FastifyRequest<{ Params: { deploymentId: string } }>, reply: FastifyReply) => {
-    const userId = request.user?.sub as string;
-    const { deploymentId } = request.params;
+  }, async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    const userId = request.user?.id as string;
+    const { id } = request.params;
 
     const deployment = await prisma.deployment.findFirst({
-      where: {
-        id: deploymentId,
-        project: {
-          OR: [
-            { userId },
-            { team: { members: { some: { userId } } } },
-          ],
-        },
-      },
-      include: {
-        build: true,
-      },
+      where: { id },
+      include: { project: true, buildJob: true, serviceDeployments: { include: { service: true } } },
     });
 
-    if (!deployment) {
-      return reply.status(404).send({
-        success: false,
-        error: {
-          code: 'DEPLOYMENT_NOT_FOUND',
-          message: 'Deployment not found or you do not have access',
-        },
-      });
-    }
+    if (!deployment) return reply.status(404).send({ error: 'Deployment not found' });
+    if (deployment.project.userId !== userId) return reply.status(403).send({ error: 'Forbidden' });
 
-    // Get logs from Redis (stored during build/deploy process)
-    const logsKey = `deployment:${deploymentId}:logs`;
-    const logs = await redis.lrange(logsKey, 0, -1);
-
-    return reply.send({
-      success: true,
-      data: {
-        logs: logs.map(log => JSON.parse(log)),
-        build: deployment.build,
-      },
-    });
+    return reply.send({ deployment });
   });
 
-  // Stream deployment logs via WebSocket
-  app.get('/deployments/:deploymentId/logs/stream', {
-    websocket: true,
+  app.post('/deployments/:id/cancel', {
     onRequest: [app.authenticate],
-  }, async (socket: any, request: FastifyRequest<{ Params: { deploymentId: string } }>) => {
-    const userId = request.user?.sub as string;
-    const { deploymentId } = request.params;
+  }, async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    const userId = request.user?.id as string;
+    const { id } = request.params;
 
     const deployment = await prisma.deployment.findFirst({
-      where: {
-        id: deploymentId,
-        project: {
-          OR: [
-            { userId },
-            { team: { members: { some: { userId } } } },
-          ],
-        },
+      where: { id },
+      include: { project: true },
+    });
+
+    if (!deployment) return reply.status(404).send({ error: 'Deployment not found' });
+    if (deployment.project.userId !== userId) return reply.status(403).send({ error: 'Forbidden' });
+    if (!['QUEUED', 'BUILDING', 'DEPLOYING'].includes(deployment.status)) {
+      return reply.status(400).send({ error: 'Cannot cancel', reason: deployment.status });
+    }
+
+    const updated = await prisma.deployment.update({
+      where: { id },
+      data: { status: 'CANCELLED', completedAt: new Date() },
+      include: { buildJob: true },
+    });
+
+    if (updated.buildJob) {
+      await prisma.buildJob.update({ where: { id: updated.buildJob.id }, data: { status: 'CANCELLED' } });
+    }
+
+    await publishEvent('deployment:cancelled', { deploymentId: id });
+    logger.info('Deployment cancelled', { deploymentId: id });
+    return reply.send({ deployment: updated });
+  });
+
+  app.post('/deployments/:id/rollback', {
+    onRequest: [app.authenticate],
+  }, async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    const userId = request.user?.id as string;
+    const { id } = request.params;
+    const body = rollbackSchema.parse(request.body);
+
+    const current = await prisma.deployment.findFirst({ where: { id }, include: { project: true } });
+    if (!current) return reply.status(404).send({ error: 'Deployment not found' });
+    if (current.project.userId !== userId) return reply.status(403).send({ error: 'Forbidden' });
+
+    const target = await prisma.deployment.findFirst({
+      where: { id: body.targetDeploymentId, projectId: current.projectId, status: 'LIVE' },
+    });
+    if (!target) return reply.status(404).send({ error: 'Target deployment not found' });
+
+    await prisma.deployment.update({ where: { id }, data: { status: 'ROLLING_BACK' } });
+
+    const rollback = await prisma.deployment.create({
+      data: {
+        projectId: current.projectId,
+        userId,
+        status: 'QUEUED',
+        environment: target.environment,
+        branch: target.branch,
+        commitSha: target.commitSha,
+        trigger: 'ROLLBACK',
+        metadata: { rollbackFrom: id, rollbackTo: body.targetDeploymentId },
       },
     });
 
-    if (!deployment) {
-      socket.send(JSON.stringify({
-        type: 'error',
-        error: 'Deployment not found or you do not have access',
-      }));
-      socket.close();
-      return;
-    }
+    await prisma.buildJob.create({ data: { deploymentId: rollback.id, status: 'PENDING' } });
+    await sendDeploymentEvent(rollback.id, 'DEPLOYMENT_CREATED', { isRollback: true });
+    logger.info('Rollback initiated', { from: id, to: body.targetDeploymentId });
+    return reply.status(201).send({ deployment: rollback });
+  });
 
-    // Subscribe to deployment logs channel
-    const channel = `deployment:${deploymentId}:logs`;
-    
-    const subscriber = redis.duplicate();
-    await subscriber.subscribe(channel);
+  app.post('/deployments/:id/redeploy', {
+    onRequest: [app.authenticate],
+  }, async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    const userId = request.user?.id as string;
+    const { id } = request.params;
 
-    subscriber.on('message', (_channel: string, message: string) => {
-      socket.send(message);
+    const source = await prisma.deployment.findFirst({
+      where: { id },
+      include: { project: { include: { services: true } } },
+    });
+    if (!source) return reply.status(404).send({ error: 'Deployment not found' });
+    if (source.project.userId !== userId) return reply.status(403).send({ error: 'Forbidden' });
+
+    const newDep = await prisma.deployment.create({
+      data: {
+        projectId: source.projectId,
+        userId,
+        status: 'QUEUED',
+        environment: source.environment,
+        branch: source.branch,
+        commitSha: source.commitSha,
+        trigger: 'MANUAL',
+      },
     });
 
-    // Send existing logs first
-    const existingLogs = await redis.lrange(`deployment:${deploymentId}:logs`, 0, -1);
-    existingLogs.forEach(log => socket.send(log));
+    await prisma.buildJob.create({ data: { deploymentId: newDep.id, status: 'PENDING' } });
+    await sendDeploymentEvent(newDep.id, 'DEPLOYMENT_CREATED', { redeployFrom: id });
+    logger.info('Redeploy triggered', { from: id, new: newDep.id });
+    return reply.status(201).send({ deployment: newDep });
+  });
 
-    socket.on('close', async () => {
-      await subscriber.unsubscribe(channel);
-      await subscriber.quit();
+  app.get('/deployments/:id/logs', {
+    onRequest: [app.authenticate],
+  }, async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    const userId = request.user?.id as string;
+    const { id } = request.params;
+
+    const deployment = await prisma.deployment.findFirst({
+      where: { id },
+      include: { project: true },
     });
+    if (!deployment) return reply.status(404).send({ error: 'Deployment not found' });
+    if (deployment.project.userId !== userId) return reply.status(403).send({ error: 'Forbidden' });
+
+    const buildLogs = deployment.buildLogs ? deployment.buildLogs.split('\n') : [];
+    return reply.send({ logs: { build: buildLogs } });
+  });
+
+  app.get('/deployments/active', {
+    onRequest: [app.authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const userId = request.user?.id as string;
+    const active = await prisma.deployment.findMany({
+      where: { userId, status: { in: ['QUEUED', 'BUILDING', 'DEPLOYING'] } },
+      include: { project: { select: { id: true, name: true, slug: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+    return reply.send({ deployments: active });
+  });
+
+  app.get('/deployments/recent', {
+    onRequest: [app.authenticate],
+  }, async (request: FastifyRequest<{ Querystring: { limit?: string } }>, reply: FastifyReply) => {
+    const userId = request.user?.id as string;
+    const limit = parseInt(request.query.limit || '10', 10);
+    const recent = await prisma.deployment.findMany({
+      where: { userId },
+      take: limit,
+      orderBy: { createdAt: 'desc' },
+      include: { project: { select: { id: true, name: true, slug: true } } },
+    });
+    return reply.send({ deployments: recent });
   });
 }
