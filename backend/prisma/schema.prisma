@@ -122,6 +122,10 @@ model Project {
   language          String?
   projectType       ProjectType @default(UNKNOWN) @map("project_type")
   
+  // Multi-service configuration
+  isMultiService    Boolean   @default(false) @map("is_multi_service")
+  serviceDetectionSource String? @map("service_detection_source") // docker-compose, turbo, nx, etc.
+  
   // Build configuration
   buildCommand      String?   @map("build_command")
   installCommand    String?   @map("install_command")
@@ -153,10 +157,136 @@ model Project {
   envVariables      EnvVariable[]
   databases         Database[]
   webhooks          Webhook[]
+  services          Service[]
   
   @@unique([userId, slug])
   @@unique([teamId, slug])
   @@map("projects")
+}
+
+// ===========================================
+// SERVICES (Multi-Service Support)
+// ===========================================
+
+model Service {
+  id              String        @id @default(uuid())
+  projectId       String        @map("project_id")
+  
+  // Service identification
+  name            String
+  slug            String
+  path            String        @default(".") // Path within repo
+  
+  // Service type
+  type            ServiceType   @default(APP)
+  
+  // Framework detection
+  framework       String?
+  language        String?
+  
+  // Docker config
+  dockerfile      String?
+  dockerContext   String?       @map("docker_context")
+  image           String?       // For managed services
+  
+  // Runtime config
+  port            Int           @default(3000)
+  exposedPort     Int?          @map("exposed_port")
+  internalOnly    Boolean       @default(false) @map("internal_only")
+  
+  // Dependencies (JSON array of service names)
+  dependsOn       Json?         @map("depends_on")
+  
+  // Build configuration
+  buildCommand    String?       @map("build_command")
+  installCommand  String?       @map("install_command")
+  startCommand    String?       @map("start_command")
+  
+  // Resource limits
+  cpuLimit        String        @default("0.5") @map("cpu_limit")
+  memoryLimit     String        @default("512m") @map("memory_limit")
+  
+  // Health check
+  healthCheckPath String?       @map("health_check_path")
+  healthCheckInterval Int       @default(30) @map("health_check_interval")
+  
+  // Deployment status per service
+  containerId     String?       @map("container_id")
+  containerName   String?       @map("container_name")
+  status          ServiceStatus @default(PENDING)
+  
+  // URLs
+  internalUrl     String?       @map("internal_url")
+  externalUrl     String?       @map("external_url")
+  
+  // Timestamps
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  
+  // Relations
+  project         Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  serviceDeployments ServiceDeployment[]
+  
+  @@unique([projectId, name])
+  @@unique([projectId, slug])
+  @@map("services")
+}
+
+model ServiceDeployment {
+  id              String        @id @default(uuid())
+  serviceId       String        @map("service_id")
+  deploymentId    String        @map("deployment_id")
+  
+  // Build info
+  imageTag        String?       @map("image_tag")
+  imageName       String?       @map("image_name")
+  
+  // Container info
+  containerId     String?       @map("container_id")
+  containerName   String?       @map("container_name")
+  
+  // Status
+  status          ServiceStatus @default(PENDING)
+  
+  // URLs
+  internalUrl     String?       @map("internal_url")
+  externalUrl     String?       @map("external_url")
+  port            Int?
+  
+  // Error handling
+  errorMessage    String?       @map("error_message") @db.Text
+  
+  // Metrics
+  buildDuration   Int?          @map("build_duration")
+  deployDuration  Int?          @map("deploy_duration")
+  
+  // Timestamps
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  
+  // Relations
+  service         Service       @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  deployment      Deployment    @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+  
+  @@index([serviceId, deploymentId])
+  @@index([deploymentId])
+  @@map("service_deployments")
+}
+
+enum ServiceType {
+  APP           // User's application code
+  MANAGED       // Managed service (PostgreSQL, Redis, etc.)
+  CUSTOM        // Custom Dockerfile
+}
+
+enum ServiceStatus {
+  PENDING
+  BUILDING
+  DEPLOYING
+  RUNNING
+  STOPPED
+  FAILED
+  UNHEALTHY
 }
 
 enum GitProvider {
@@ -169,6 +299,7 @@ enum ProjectType {
   STATIC
   BACKEND
   FULLSTACK
+  MULTI_SERVICE
   UNKNOWN
 }
 
@@ -179,10 +310,16 @@ enum ProjectType {
 model Deployment {
   id            String           @id @default(uuid())
   projectId     String           @map("project_id")
+  userId        String?          @map("user_id")
   
   // Deployment info
   status        DeploymentStatus @default(QUEUED)
   trigger       DeploymentTrigger @default(MANUAL)
+  environment   Environment      @default(PRODUCTION)
+  
+  // Multi-service deployment
+  isMultiService Boolean         @default(false) @map("is_multi_service")
+  serviceCount   Int?            @map("service_count")
   
   // Git info
   commitSha     String?          @map("commit_sha")
@@ -193,6 +330,12 @@ model Deployment {
   // Build info
   imageTag      String?          @map("image_tag")
   buildLogs     String?          @map("build_logs") @db.Text
+  
+  // Container/Network info (for multi-service)
+  networkName   String?          @map("network_name")
+  
+  // URLs
+  url           String?          // Primary deployment URL
   
   // Timing
   queuedAt      DateTime         @default(now()) @map("queued_at")
@@ -216,6 +359,8 @@ model Deployment {
   
   // Relations
   project       Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  buildJob      BuildJob?
+  serviceDeployments ServiceDeployment[]
   
   @@index([projectId, status])
   @@index([createdAt])
@@ -392,6 +537,9 @@ model BuildJob {
   
   createdAt     DateTime    @default(now()) @map("created_at")
   updatedAt     DateTime    @updatedAt @map("updated_at")
+  
+  // Relations
+  deployment    Deployment  @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
   
   @@index([status, priority])
   @@map("build_jobs")
