@@ -300,11 +300,17 @@ export interface CreateDatabaseInput {
 }
 
 export interface DashboardMetrics {
+  period: string;
+  since: string;
   overview: {
     totalProjects: number;
     activeDeployments: number;
     totalDatabases: number;
-    deploymentsToday: number;
+  };
+  deployments: {
+    total: number;
+    successful: number;
+    failed: number;
     successRate: number;
   };
   recentActivity: {
@@ -313,8 +319,6 @@ export interface DashboardMetrics {
     projectSlug: string;
     status: string;
     createdAt: string;
-    branch: string;
-    commitSha: string;
   }[];
 }
 
