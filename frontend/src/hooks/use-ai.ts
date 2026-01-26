@@ -7,11 +7,11 @@ const API_URL = 'http://localhost:8000';
 
 async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = typeof window !== 'undefined' ? localStorage.getItem('auth-token') : null;
-  const response = await fetch(\`\${API_URL}\${endpoint}\`, {
+  const response = await fetch(`${API_URL}${endpoint}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      ...(token && { Authorization: \`Bearer \${token}\` }),
+      ...(token && { Authorization: `Bearer ${token}` }),
       ...options.headers,
     },
   });
@@ -171,7 +171,7 @@ export function usePreviewEnvironments(projectId: string) {
   const query = useQuery({
     queryKey: ['previews', projectId],
     queryFn: async () => {
-      const response = await apiRequest<{ success: boolean; data: PreviewEnvironment[] }>(\`/api/v1/previews/\${projectId}\`);
+      const response = await apiRequest<{ success: boolean; data: PreviewEnvironment[] }>(`/api/v1/previews/${projectId}`);
       return response.data;
     },
     enabled: !!projectId,
@@ -180,7 +180,7 @@ export function usePreviewEnvironments(projectId: string) {
   const createMutation = useMutation({
     mutationFn: async (data: { pullRequestNumber: number; pullRequestTitle: string; branch: string; commitSha: string; headRef: string; baseRef: string }) => {
       const response = await apiRequest<{ success: boolean; data: PreviewEnvironment }>(
-        \`/api/v1/previews/\${projectId}\`,
+        `/api/v1/previews/${projectId}`,
         { method: 'POST', body: JSON.stringify(data) }
       );
       return response.data;
@@ -189,7 +189,7 @@ export function usePreviewEnvironments(projectId: string) {
 
   const deleteMutation = useMutation({
     mutationFn: async (prNumber: number) => {
-      await apiRequest(\`/api/v1/previews/\${projectId}/\${prNumber}\`, { method: 'DELETE' });
+      await apiRequest(`/api/v1/previews/${projectId}/${prNumber}`, { method: 'DELETE' });
     },
   });
 
@@ -209,7 +209,7 @@ export function usePreviewStats(projectId: string) {
   return useQuery({
     queryKey: ['preview-stats', projectId],
     queryFn: async () => {
-      const response = await apiRequest<{ success: boolean; data: { total: number; byStatus: Record<string, number>; activeDeployments: number } }>(\`/api/v1/previews/\${projectId}/stats\`);
+      const response = await apiRequest<{ success: boolean; data: { total: number; byStatus: Record<string, number>; activeDeployments: number } }>(`/api/v1/previews/${projectId}/stats`);
       return response.data;
     },
     enabled: !!projectId,

@@ -1,22 +1,26 @@
 // ===========================================
 // ZYPHRON CLI - LOGIN COMMAND
-// Authenticate with the Zyphron platform
+// Next-level animated terminal experience
+// Pure Light Blue + Purple Theme
 // ===========================================
 
 import { Command } from 'commander';
-import inquirer from 'inquirer';
 import { api, getErrorMessage } from '../../lib/api.js';
 import { setToken, setApiUrl, setUser, getEnvApiUrl } from '../../lib/config.js';
 import { 
   style,
+  purpleBlueGradient,
   purpleGradient,
   createOraSpinner,
-  printSuccess, 
-  printError, 
-  printWarning,
-  printInfo,
   box,
   sleep,
+  promptInput,
+  promptPassword,
+  showSuccessAnimation,
+  showErrorAnimation,
+  animatedDivider,
+  typewriterEffect,
+  drawDivider,
 } from '../../lib/ui.js';
 
 interface LoginOptions {
@@ -26,7 +30,7 @@ interface LoginOptions {
 }
 
 // ===========================================
-// LOGIN COMMAND
+// LOGIN COMMAND - Production Ready
 // ===========================================
 
 export const loginCommand = new Command('login')
@@ -35,84 +39,93 @@ export const loginCommand = new Command('login')
   .option('-p, --password <password>', 'Account password')
   .option('--api-url <url>', 'Custom API URL')
   .action(async (options: LoginOptions) => {
-    console.log('\n');
+    // Clear and show animated header
+    console.clear();
+    console.log('');
     
-    // Show purple gradient title
-    console.log(purpleGradient('🔐 ZYPHRON LOGIN'));
-    console.log(style.dim('━'.repeat(50)));
-    console.log('\n');
+    // Animated title
+    const title = '  ZYPHRON LOGIN';
+    for (const char of title) {
+      process.stdout.write(purpleBlueGradient(char));
+      await sleep(30);
+    }
+    console.log('');
+    await animatedDivider(50);
+    console.log('');
     
     try {
       // Set custom API URL if provided
       if (options.apiUrl) {
         api.setBaseUrl(options.apiUrl);
         setApiUrl(options.apiUrl);
-        printInfo(`Using custom API: ${options.apiUrl}`);
+        console.log(`  ${style.purple('▶')} ${style.blueLight('Custom API:')} ${style.dim(options.apiUrl)}`);
         console.log('');
       }
       
-      // Get credentials - use provided or prompt
+      // Get credentials
       let email = options.email;
       let password = options.password;
       
       if (!email || !password) {
-        printInfo('Enter your Zyphron credentials:');
+        await typewriterEffect('  Enter your credentials:', 20);
         console.log('');
         
-        const answers = await inquirer.prompt([
-          {
-            type: 'input',
-            name: 'email',
-            message: style.purple('Email:'),
-            when: !email,
-            validate: (input: string) => {
-              if (!input.includes('@')) {
-                return 'Please enter a valid email address';
-              }
+        if (!email) {
+          email = await promptInput({
+            message: 'Email',
+            validate: (input) => {
+              if (!input.includes('@')) return 'Please enter a valid email';
               return true;
             },
-          },
-          {
-            type: 'password',
-            name: 'password',
-            message: style.purple('Password:'),
-            when: !password,
-            mask: '●',
-            validate: (input: string) => {
-              if (input.length < 6) {
-                return 'Password must be at least 6 characters';
-              }
-              return true;
-            },
-          },
-        ]);
+          });
+        }
         
-        email = email || answers.email;
-        password = password || answers.password;
+        if (!password) {
+          password = await promptPassword({
+            message: 'Password',
+            validate: (input) => {
+              if (input.length < 6) return 'Password must be at least 6 characters';
+              return true;
+            },
+          });
+        }
       }
       
       console.log('');
       
-      // Animate login process
-      const spinner = createOraSpinner('Connecting to Zyphron...');
+      // Animated login process with multiple stages
+      const stages = [
+        'Connecting to Zyphron',
+        'Verifying credentials',
+        'Establishing secure session',
+      ];
+      
+      for (let i = 0; i < stages.length; i++) {
+        const spinner = createOraSpinner(stages[i]);
+        spinner.start();
+        await sleep(400 + Math.random() * 300);
+        spinner.succeed(style.purpleLight(stages[i]));
+      }
+      
+      // Authenticate
+      const spinner = createOraSpinner('Authenticating');
       spinner.start();
       
-      await sleep(800);
-      spinner.text = style.purple('Authenticating...');
-      
-      // Call login API
       const response = await api.login(email!, password!);
       
       if (!response.success) {
         spinner.fail(style.error('Authentication failed'));
-        printError('Invalid credentials. Please try again.');
+        console.log('');
+        await showErrorAnimation('Invalid email or password');
+        console.log('');
+        console.log(`  ${style.dim('Forgot your password?')} ${style.cyan('https://zyphron.dev/reset')}`);
+        console.log('');
         process.exit(1);
       }
       
-      spinner.text = style.purple('Securing session...');
-      await sleep(500);
+      spinner.succeed(style.cyan('Authenticated'));
       
-      // Save token and user info
+      // Save session
       setToken(response.data.token);
       setUser({
         id: response.data.user.id,
@@ -121,35 +134,39 @@ export const loginCommand = new Command('login')
         avatarUrl: response.data.user.avatarUrl || undefined,
       });
       
-      spinner.succeed(style.success('Authenticated!'));
-      
       console.log('');
+      
+      // Animated success box
       console.log(box(
         [
-          purpleGradient('✨ Welcome back!'),
           '',
-          `${style.purple('User:')} ${response.data.user.name}`,
-          `${style.purple('Email:')} ${response.data.user.email}`,
+          purpleBlueGradient('  Welcome back!'),
           '',
-          style.dim(`API: ${getEnvApiUrl()}`),
+          `  ${style.purple('User')}   ${style.blueLight(response.data.user.name)}`,
+          `  ${style.purple('Email')}  ${style.blueLight(response.data.user.email)}`,
+          '',
+          `  ${style.dim('API')}    ${style.dim(getEnvApiUrl())}`,
+          '',
         ].join('\n'),
         'Session Active'
       ));
       
       console.log('');
-      printSuccess('You are now logged in to Zyphron!');
+      await showSuccessAnimation('You are now logged in to Zyphron!');
       console.log('');
-      printInfo('Quick start commands:');
-      console.log(style.dim(`  ${style.purple('zyphron projects')}      List your projects`));
-      console.log(style.dim(`  ${style.purple('zyphron init')}          Initialize a new project`));
-      console.log(style.dim(`  ${style.purple('zyphron deploy')}        Deploy your project`));
+      
+      // Quick start hints
+      console.log(`  ${style.purple('Quick Start:')}`);
+      console.log(`    ${style.dim('1.')} ${style.blue('zyphron projects')}  ${style.dim('- List your projects')}`);
+      console.log(`    ${style.dim('2.')} ${style.purple('zyphron init')}      ${style.dim('- Initialize a project')}`);
+      console.log(`    ${style.dim('3.')} ${style.blue('zyphron deploy')}    ${style.dim('- Deploy your code')}`);
       console.log('');
       
     } catch (error) {
-      printError(`Login failed: ${getErrorMessage(error)}`);
       console.log('');
-      printWarning('If you don\'t have an account, run:');
-      console.log(style.dim(`  ${style.purple('zyphron auth register')}`));
+      await showErrorAnimation(`Login failed: ${getErrorMessage(error)}`);
+      console.log('');
+      console.log(`  ${style.dim('Need an account?')} ${style.purple('zyphron register')}`);
       console.log('');
       process.exit(1);
     }

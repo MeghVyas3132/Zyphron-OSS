@@ -1,78 +1,94 @@
 // ===========================================
 // ZYPHRON CLI - LOGOUT COMMAND
-// Clear authentication session
+// Next-level animated terminal experience
+// Pure Light Blue + Purple Theme
 // ===========================================
 
 import { Command } from 'commander';
 import { clearToken, getUser, isAuthenticated } from '../../lib/config.js';
 import { 
   style,
-  purpleGradient,
+  purpleBlueGradient,
   createOraSpinner,
-  printSuccess, 
-  printWarning,
-  printInfo,
-  box,
   sleep,
-  symbols,
+  showAnimatedGoodbye,
+  animatedDivider,
+  typewriterEffect,
+  promptConfirm,
 } from '../../lib/ui.js';
 
 // ===========================================
-// LOGOUT COMMAND
+// LOGOUT COMMAND - Production Ready
 // ===========================================
 
 export const logoutCommand = new Command('logout')
   .description('Log out from Zyphron')
   .option('-f, --force', 'Force logout without confirmation')
   .action(async (options: { force?: boolean }) => {
-    console.log('\n');
+    // Clear and show animated header
+    console.clear();
+    console.log('');
     
-    // Show purple gradient title
-    console.log(purpleGradient('🔓 ZYPHRON LOGOUT'));
-    console.log(style.dim('━'.repeat(50)));
-    console.log('\n');
+    // Animated title
+    const title = '  ZYPHRON LOGOUT';
+    for (const char of title) {
+      process.stdout.write(purpleBlueGradient(char));
+      await sleep(30);
+    }
+    console.log('');
+    await animatedDivider(50);
+    console.log('');
     
     // Check if logged in
     if (!isAuthenticated()) {
-      printWarning('You are not currently logged in.');
+      console.log(`  ${style.purple('▶')} ${style.blueLight('You are not currently logged in.')}`);
       console.log('');
-      printInfo('To log in, run:');
-      console.log(style.dim(`  ${style.purple('zyphron login')}`));
+      console.log(`  ${style.dim('To log in, run:')} ${style.purple('zyphron login')}`);
       console.log('');
       return;
     }
     
     const user = getUser();
     
+    // Show current user
+    console.log(`  ${style.purple('▶')} ${style.dim('Logged in as:')} ${style.blueLight(user?.email || 'unknown')}`);
+    console.log('');
+    
     // Confirm logout if not forced
     if (!options.force) {
-      console.log(style.dim(`Currently logged in as: ${style.purple(user?.email || 'unknown')}`));
-      console.log('');
+      const confirmed = await promptConfirm('Are you sure you want to log out?', true);
+      if (!confirmed) {
+        console.log('');
+        console.log(`  ${style.purple('▶')} ${style.blueLight('Logout cancelled.')}`);
+        console.log('');
+        return;
+      }
     }
     
-    // Animate logout
-    const spinner = createOraSpinner('Logging out...');
-    spinner.start();
+    console.log('');
     
-    await sleep(500);
-    spinner.text = style.purple('Clearing session...');
+    // Animated logout process
+    const stages = [
+      'Ending session',
+      'Clearing credentials',
+    ];
+    
+    for (let i = 0; i < stages.length; i++) {
+      const spinner = createOraSpinner(stages[i]);
+      spinner.start();
+      await sleep(300 + Math.random() * 200);
+      spinner.succeed(style.purpleLight(stages[i]));
+    }
     
     // Clear credentials
     clearToken();
     
-    await sleep(300);
-    spinner.succeed(style.success('Logged out successfully!'));
+    // Final success
+    const spinner = createOraSpinner('Logging out');
+    spinner.start();
+    await sleep(200);
+    spinner.succeed(style.cyan('Logged out successfully'));
     
-    console.log('');
-    console.log(box(
-      [
-        `${symbols.check} Session cleared`,
-        '',
-        style.dim('Your credentials have been removed from this device.'),
-        '',
-        `${style.purple('To log in again:')} zyphron login`,
-      ].join('\n'),
-      'Goodbye!'
-    ));
-    console.log('');
+    // Show animated goodbye
+    await showAnimatedGoodbye();
   });
