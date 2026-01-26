@@ -20,6 +20,7 @@ model User {
   id            String    @id @default(uuid())
   email         String    @unique
   name          String?
+  password      String?   // For email/password auth
   avatarUrl     String?   @map("avatar_url")
   githubId      String?   @unique @map("github_id")
   gitlabId      String?   @unique @map("gitlab_id")

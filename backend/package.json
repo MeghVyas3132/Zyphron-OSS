@@ -50,9 +50,11 @@
     "tar": "^6.2.0",
     "unzipper": "^0.10.14",
     "yaml": "^2.3.4",
-    "zod": "^3.22.4"
+    "zod": "^3.22.4",
+    "bcryptjs": "^2.4.3"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/dockerode": "^3.3.23",
     "@types/node": "^20.11.10",
     "@types/tar": "^6.1.11",
