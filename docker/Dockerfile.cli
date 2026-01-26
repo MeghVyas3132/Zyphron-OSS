@@ -1,0 +1,33 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apk add --no-cache git curl bash
+
+# Copy package files first for better caching
+COPY cli/package*.json ./
+
+# Install dependencies
+RUN npm install
+
+# Copy source files
+COPY cli/tsconfig.json ./
+COPY cli/src/ ./src/
+COPY cli/bin/ ./bin/
+
+# Build TypeScript
+RUN npm run build
+
+# Make the CLI executable globally
+RUN npm link
+
+# Set default shell to bash for better experience
+ENV SHELL=/bin/bash
+
+# Create a test script to demonstrate the CLI
+RUN echo '#!/bin/bash\necho "Zyphron CLI is ready!"\nzyphron --help' > /test-cli.sh && chmod +x /test-cli.sh
+
+# Default command shows help
+ENTRYPOINT ["zyphron"]
+CMD ["--help"]
