@@ -1,0 +1,1924 @@
+openapi: 3.1.0
+info:
+  title: Zyphron Platform API
+  description: |
+    # Zyphron Platform API Documentation
+    
+    Zyphron is a comprehensive deployment platform that provides:
+    - **Automatic Framework Detection** - AI-powered project analysis
+    - **Multi-Cloud Deployment** - Deploy to AWS, GCP, Azure, Oracle
+    - **Advanced Deployment Strategies** - Rolling, Blue-Green, Canary
+    - **Edge Functions** - Serverless at the edge
+    - **Database Branching** - Preview environment databases
+    - **Observability** - Metrics, tracing, alerts
+    - **Chaos Engineering** - Resilience testing
+    - **Self-Deployment** - Platform can deploy itself
+    
+    ## Authentication
+    
+    All API endpoints (except `/health` and `/auth`) require authentication via JWT Bearer token.
+    
+    ```
+    Authorization: Bearer <your-jwt-token>
+    ```
+    
+    ## Rate Limiting
+    
+    - Standard: 100 requests per minute
+    - Premium: 1000 requests per minute
+    - Enterprise: Unlimited
+    
+  version: 1.0.0
+  contact:
+    name: Zyphron Support
+    email: support@zyphron.dev
+    url: https://zyphron.dev/docs
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:3000/api/v1
+    description: Development server
+  - url: https://api.zyphron.dev/v1
+    description: Production server
+
+tags:
+  - name: Health
+    description: Health check endpoints
+  - name: Auth
+    description: Authentication and authorization
+  - name: Projects
+    description: Project management
+  - name: Deployments
+    description: Deployment operations
+  - name: Domains
+    description: Domain management
+  - name: Environment
+    description: Environment variable management
+  - name: Teams
+    description: Team management
+  - name: API Keys
+    description: API key management
+  - name: Databases
+    description: Database management
+  - name: AI
+    description: AI-powered analysis and generation
+  - name: Cloud
+    description: Multi-cloud deployment
+  - name: Strategies
+    description: Deployment strategies (Rolling, Blue-Green, Canary)
+  - name: Edge
+    description: Edge functions
+  - name: Observability
+    description: Metrics, tracing, and alerts
+  - name: Chaos
+    description: Chaos engineering experiments
+  - name: DB Branches
+    description: Database branching for previews
+  - name: Self Deploy
+    description: Platform self-deployment
+
+paths:
+  # ===========================================
+  # HEALTH
+  # ===========================================
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      description: Check if the API is running and healthy
+      operationId: healthCheck
+      responses:
+        '200':
+          description: API is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  timestamp:
+                    type: string
+                    format: date-time
+                  version:
+                    type: string
+                    example: 1.0.0
+                  uptime:
+                    type: number
+                    example: 86400
+
+  /health/ready:
+    get:
+      tags: [Health]
+      summary: Readiness check
+      description: Check if the API is ready to accept requests
+      operationId: readinessCheck
+      responses:
+        '200':
+          description: API is ready
+        '503':
+          description: API is not ready
+
+  # ===========================================
+  # AUTH
+  # ===========================================
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new user
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, name]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: user@example.com
+                password:
+                  type: string
+                  minLength: 8
+                  example: securepassword123
+                name:
+                  type: string
+                  example: John Doe
+      responses:
+        '201':
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: User already exists
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login user
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get current user
+      operationId: getCurrentUser
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current user data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout user
+      operationId: logout
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Logged out successfully
+
+  # ===========================================
+  # PROJECTS
+  # ===========================================
+  /projects:
+    get:
+      tags: [Projects]
+      summary: List all projects
+      operationId: listProjects
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of projects
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Project'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+    post:
+      tags: [Projects]
+      summary: Create a new project
+      operationId: createProject
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectInput'
+      responses:
+        '201':
+          description: Project created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+
+  /projects/{projectId}:
+    get:
+      tags: [Projects]
+      summary: Get project by ID
+      operationId: getProject
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Project details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Projects]
+      summary: Update project
+      operationId: updateProject
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProjectInput'
+      responses:
+        '200':
+          description: Project updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+    delete:
+      tags: [Projects]
+      summary: Delete project
+      operationId: deleteProject
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '204':
+          description: Project deleted
+
+  /projects/{projectId}/deploy:
+    post:
+      tags: [Deployments]
+      summary: Deploy project
+      operationId: deployProject
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                branch:
+                  type: string
+                  default: main
+                environment:
+                  type: string
+                  enum: [production, staging, preview]
+                  default: production
+      responses:
+        '202':
+          description: Deployment started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deployment'
+
+  # ===========================================
+  # DEPLOYMENTS
+  # ===========================================
+  /deployments:
+    get:
+      tags: [Deployments]
+      summary: List deployments
+      operationId: listDeployments
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: projectId
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING, BUILDING, DEPLOYING, READY, FAILED, CANCELLED]
+      responses:
+        '200':
+          description: List of deployments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Deployment'
+
+  /deployments/{deploymentId}:
+    get:
+      tags: [Deployments]
+      summary: Get deployment details
+      operationId: getDeployment
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: deploymentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deployment details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deployment'
+
+  /deployments/{deploymentId}/logs:
+    get:
+      tags: [Deployments]
+      summary: Get deployment logs
+      operationId: getDeploymentLogs
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: deploymentId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: lines
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: Deployment logs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        timestamp:
+                          type: string
+                        level:
+                          type: string
+                        message:
+                          type: string
+
+  /deployments/{deploymentId}/cancel:
+    post:
+      tags: [Deployments]
+      summary: Cancel deployment
+      operationId: cancelDeployment
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: deploymentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deployment cancelled
+
+  /deployments/{deploymentId}/rollback:
+    post:
+      tags: [Deployments]
+      summary: Rollback to previous deployment
+      operationId: rollbackDeployment
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: deploymentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Rollback initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deployment'
+
+  # ===========================================
+  # AI
+  # ===========================================
+  /ai/analyze:
+    post:
+      tags: [AI]
+      summary: Analyze repository
+      description: AI-powered analysis of a repository to detect frameworks, security issues, and performance recommendations
+      operationId: analyzeRepository
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [repoUrl]
+              properties:
+                repoUrl:
+                  type: string
+                  format: uri
+                  example: https://github.com/user/repo
+                branch:
+                  type: string
+                  default: main
+      responses:
+        '200':
+          description: Analysis results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIAnalysisResult'
+
+  /ai/dockerfile:
+    post:
+      tags: [AI]
+      summary: Generate Dockerfile
+      description: Generate an optimized Dockerfile for a repository
+      operationId: generateDockerfile
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [repoUrl]
+              properties:
+                repoUrl:
+                  type: string
+                  format: uri
+      responses:
+        '200':
+          description: Generated Dockerfile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  dockerfile:
+                    type: string
+                  stages:
+                    type: array
+                    items:
+                      type: string
+                  optimizations:
+                    type: array
+                    items:
+                      type: string
+
+  # ===========================================
+  # MULTI-CLOUD
+  # ===========================================
+  /cloud/providers:
+    get:
+      tags: [Cloud]
+      summary: List available cloud providers
+      operationId: listCloudProviders
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Available cloud providers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CloudProvider'
+
+  /cloud/deploy:
+    post:
+      tags: [Cloud]
+      summary: Deploy to cloud provider
+      operationId: deployToCloud
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [projectId, provider, region]
+              properties:
+                projectId:
+                  type: string
+                provider:
+                  type: string
+                  enum: [aws, gcp, azure, oracle]
+                region:
+                  type: string
+                config:
+                  type: object
+      responses:
+        '202':
+          description: Cloud deployment started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudDeployment'
+
+  /cloud/deployments/{deploymentId}:
+    get:
+      tags: [Cloud]
+      summary: Get cloud deployment status
+      operationId: getCloudDeployment
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: deploymentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Cloud deployment status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudDeployment'
+
+  # ===========================================
+  # DEPLOYMENT STRATEGIES
+  # ===========================================
+  /strategies/rolling:
+    post:
+      tags: [Strategies]
+      summary: Start rolling deployment
+      operationId: rollingDeploy
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StrategyDeployInput'
+      responses:
+        '202':
+          description: Rolling deployment started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StrategyDeployment'
+
+  /strategies/blue-green:
+    post:
+      tags: [Strategies]
+      summary: Start blue-green deployment
+      operationId: blueGreenDeploy
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StrategyDeployInput'
+      responses:
+        '202':
+          description: Blue-green deployment started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StrategyDeployment'
+
+  /strategies/canary:
+    post:
+      tags: [Strategies]
+      summary: Start canary deployment
+      operationId: canaryDeploy
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StrategyDeployInput'
+      responses:
+        '202':
+          description: Canary deployment started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StrategyDeployment'
+
+  /strategies/deployments/{deploymentId}/switch:
+    post:
+      tags: [Strategies]
+      summary: Switch traffic between versions
+      operationId: switchTraffic
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: deploymentId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                percentage:
+                  type: integer
+                  minimum: 0
+                  maximum: 100
+                target:
+                  type: string
+                  enum: [new, current]
+      responses:
+        '200':
+          description: Traffic switched
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StrategyDeployment'
+
+  /strategies/deployments/{deploymentId}/rollback:
+    post:
+      tags: [Strategies]
+      summary: Rollback strategy deployment
+      operationId: rollbackStrategyDeployment
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: deploymentId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Rollback initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StrategyDeployment'
+
+  # ===========================================
+  # EDGE FUNCTIONS
+  # ===========================================
+  /edge/functions:
+    get:
+      tags: [Edge]
+      summary: List edge functions
+      operationId: listEdgeFunctions
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: projectId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of edge functions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EdgeFunction'
+    post:
+      tags: [Edge]
+      summary: Create edge function
+      operationId: createEdgeFunction
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEdgeFunctionInput'
+      responses:
+        '201':
+          description: Edge function created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EdgeFunction'
+
+  /edge/functions/{functionId}:
+    get:
+      tags: [Edge]
+      summary: Get edge function
+      operationId: getEdgeFunction
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: functionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Edge function details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EdgeFunction'
+
+  /edge/functions/{functionId}/deploy:
+    post:
+      tags: [Edge]
+      summary: Deploy edge function
+      operationId: deployEdgeFunction
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: functionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                regions:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '202':
+          description: Edge function deployment started
+
+  /edge/functions/{functionId}/invoke:
+    post:
+      tags: [Edge]
+      summary: Invoke edge function
+      operationId: invokeEdgeFunction
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: functionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Function invocation result
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # ===========================================
+  # OBSERVABILITY
+  # ===========================================
+  /observability/metrics:
+    get:
+      tags: [Observability]
+      summary: Get metrics
+      operationId: getMetrics
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: projectId
+          in: query
+          schema:
+            type: string
+        - name: timeRange
+          in: query
+          schema:
+            type: string
+            enum: [1h, 6h, 24h, 7d, 30d]
+            default: 24h
+      responses:
+        '200':
+          description: Metrics data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetricsData'
+
+  /observability/traces:
+    get:
+      tags: [Observability]
+      summary: Get distributed traces
+      operationId: getTraces
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: projectId
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Trace data
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Trace'
+
+  /observability/alerts:
+    get:
+      tags: [Observability]
+      summary: List alerts
+      operationId: listAlerts
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of alerts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Alert'
+    post:
+      tags: [Observability]
+      summary: Create alert
+      operationId: createAlert
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAlertInput'
+      responses:
+        '201':
+          description: Alert created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Alert'
+
+  # ===========================================
+  # CHAOS ENGINEERING
+  # ===========================================
+  /chaos/experiments:
+    get:
+      tags: [Chaos]
+      summary: List chaos experiments
+      operationId: listChaosExperiments
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of experiments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ChaosExperiment'
+    post:
+      tags: [Chaos]
+      summary: Create chaos experiment
+      operationId: createChaosExperiment
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateChaosExperimentInput'
+      responses:
+        '201':
+          description: Experiment created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChaosExperiment'
+
+  /chaos/experiments/{experimentId}/run:
+    post:
+      tags: [Chaos]
+      summary: Run chaos experiment
+      operationId: runChaosExperiment
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: experimentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Experiment started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChaosExperiment'
+
+  /chaos/experiments/{experimentId}/stop:
+    post:
+      tags: [Chaos]
+      summary: Stop chaos experiment
+      operationId: stopChaosExperiment
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: experimentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Experiment stopped
+
+  # ===========================================
+  # DATABASE BRANCHING
+  # ===========================================
+  /db-branches:
+    get:
+      tags: [DB Branches]
+      summary: List database branches
+      operationId: listDatabaseBranches
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: databaseId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of database branches
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DatabaseBranch'
+    post:
+      tags: [DB Branches]
+      summary: Create database branch
+      operationId: createDatabaseBranch
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDatabaseBranchInput'
+      responses:
+        '201':
+          description: Database branch created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatabaseBranch'
+
+  /db-branches/{branchId}:
+    get:
+      tags: [DB Branches]
+      summary: Get database branch
+      operationId: getDatabaseBranch
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: branchId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Database branch details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatabaseBranch'
+    delete:
+      tags: [DB Branches]
+      summary: Delete database branch
+      operationId: deleteDatabaseBranch
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: branchId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Branch deleted
+
+  /db-branches/{branchId}/sync:
+    post:
+      tags: [DB Branches]
+      summary: Sync database branch from parent
+      operationId: syncDatabaseBranch
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: branchId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Sync started
+
+  /db-branches/{branchId}/merge:
+    post:
+      tags: [DB Branches]
+      summary: Merge database branch to parent
+      operationId: mergeDatabaseBranch
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: branchId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                deleteAfterMerge:
+                  type: boolean
+                  default: false
+      responses:
+        '200':
+          description: Merge initiated
+
+  # ===========================================
+  # SELF DEPLOYMENT
+  # ===========================================
+  /self-deploy/health:
+    get:
+      tags: [Self Deploy]
+      summary: Get system health
+      operationId: getSystemHealth
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: System health status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemHealth'
+
+  /self-deploy/version:
+    get:
+      tags: [Self Deploy]
+      summary: Get current platform version
+      operationId: getCurrentVersion
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current version
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    type: string
+                    example: v1.2.3
+
+  /self-deploy/manifest:
+    get:
+      tags: [Self Deploy]
+      summary: Get deployment manifest
+      operationId: getDeploymentManifest
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: version
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deployment manifest
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /self-deploy/deploy:
+    post:
+      tags: [Self Deploy]
+      summary: Deploy new platform version
+      operationId: selfDeploy
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version:
+                  type: string
+                strategy:
+                  type: string
+                  enum: [rolling, blue-green, canary]
+                  default: rolling
+                components:
+                  type: object
+                  properties:
+                    api:
+                      type: boolean
+                    worker:
+                      type: boolean
+                    frontend:
+                      type: boolean
+      responses:
+        '202':
+          description: Self-deployment started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SelfDeployment'
+
+  /self-deploy/deployments:
+    get:
+      tags: [Self Deploy]
+      summary: List self-deployments
+      operationId: listSelfDeployments
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: List of self-deployments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SelfDeployment'
+
+  /self-deploy/deployments/{deploymentId}:
+    get:
+      tags: [Self Deploy]
+      summary: Get self-deployment status
+      operationId: getSelfDeploymentStatus
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: deploymentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Self-deployment status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SelfDeployment'
+
+  /self-deploy/deployments/{deploymentId}/rollback:
+    post:
+      tags: [Self Deploy]
+      summary: Rollback self-deployment
+      operationId: rollbackSelfDeployment
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: deploymentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Rollback initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SelfDeployment'
+
+# ===========================================
+# COMPONENTS
+# ===========================================
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    ProjectId:
+      name: projectId
+      in: path
+      required: true
+      schema:
+        type: string
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        statusCode:
+          type: integer
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+        totalPages:
+          type: integer
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        avatarUrl:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    AuthResponse:
+      type: object
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        token:
+          type: string
+
+    Project:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        repoUrl:
+          type: string
+        framework:
+          type: string
+        status:
+          type: string
+          enum: [ACTIVE, BUILDING, DEPLOYING, FAILED, PAUSED]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        latestDeployment:
+          $ref: '#/components/schemas/Deployment'
+
+    CreateProjectInput:
+      type: object
+      required: [name, repoUrl]
+      properties:
+        name:
+          type: string
+        repoUrl:
+          type: string
+          format: uri
+        branch:
+          type: string
+          default: main
+        framework:
+          type: string
+        buildCommand:
+          type: string
+        outputDirectory:
+          type: string
+
+    UpdateProjectInput:
+      type: object
+      properties:
+        name:
+          type: string
+        buildCommand:
+          type: string
+        outputDirectory:
+          type: string
+        envVars:
+          type: object
+
+    Deployment:
+      type: object
+      properties:
+        id:
+          type: string
+        projectId:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, BUILDING, DEPLOYING, READY, FAILED, CANCELLED]
+        branch:
+          type: string
+        commitSha:
+          type: string
+        commitMessage:
+          type: string
+        url:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        duration:
+          type: integer
+
+    CloudProvider:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        displayName:
+          type: string
+        regions:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              name:
+                type: string
+              available:
+                type: boolean
+
+    CloudDeployment:
+      type: object
+      properties:
+        id:
+          type: string
+        provider:
+          type: string
+        region:
+          type: string
+        status:
+          type: string
+        url:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    StrategyDeployInput:
+      type: object
+      required: [projectId, deploymentId]
+      properties:
+        projectId:
+          type: string
+        deploymentId:
+          type: string
+        config:
+          type: object
+        healthCheckUrl:
+          type: string
+        rollbackOnFailure:
+          type: boolean
+          default: true
+
+    StrategyDeployment:
+      type: object
+      properties:
+        id:
+          type: string
+        projectId:
+          type: string
+        strategy:
+          type: string
+          enum: [rolling, blue-green, canary]
+        status:
+          type: string
+          enum: [pending, in-progress, switching, completed, failed, rolled-back]
+        progress:
+          type: object
+          properties:
+            percentage:
+              type: integer
+            currentPhase:
+              type: string
+        trafficSplit:
+          type: object
+          properties:
+            current:
+              type: integer
+            new:
+              type: integer
+        versions:
+          type: object
+          properties:
+            current:
+              type: string
+            new:
+              type: string
+
+    EdgeFunction:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        projectId:
+          type: string
+        runtime:
+          type: string
+        entrypoint:
+          type: string
+        status:
+          type: string
+        deployedRegions:
+          type: array
+          items:
+            type: string
+        url:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateEdgeFunctionInput:
+      type: object
+      required: [name, projectId, code]
+      properties:
+        name:
+          type: string
+        projectId:
+          type: string
+        code:
+          type: string
+        runtime:
+          type: string
+          default: javascript
+
+    MetricsData:
+      type: object
+      properties:
+        requestsPerMinute:
+          type: array
+          items:
+            type: object
+            properties:
+              timestamp:
+                type: string
+              value:
+                type: number
+        responseTime:
+          type: object
+          properties:
+            avg:
+              type: number
+            p95:
+              type: number
+            p99:
+              type: number
+        errorRate:
+          type: number
+        cpuUsage:
+          type: number
+        memoryUsage:
+          type: number
+
+    Trace:
+      type: object
+      properties:
+        traceId:
+          type: string
+        serviceName:
+          type: string
+        operationName:
+          type: string
+        duration:
+          type: integer
+        status:
+          type: string
+        spans:
+          type: array
+          items:
+            type: object
+
+    Alert:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        condition:
+          type: string
+        threshold:
+          type: number
+        status:
+          type: string
+          enum: [active, triggered, resolved, disabled]
+        channels:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateAlertInput:
+      type: object
+      required: [name, condition, threshold]
+      properties:
+        name:
+          type: string
+        metric:
+          type: string
+        condition:
+          type: string
+          enum: [gt, lt, eq, gte, lte]
+        threshold:
+          type: number
+        channels:
+          type: array
+          items:
+            type: string
+            enum: [email, slack, pagerduty, webhook]
+
+    ChaosExperiment:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [network-latency, cpu-stress, memory-stress, container-kill, dependency-failure]
+        targetService:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, completed, failed, stopped]
+        config:
+          type: object
+        results:
+          type: object
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateChaosExperimentInput:
+      type: object
+      required: [name, type, targetService]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          enum: [network-latency, cpu-stress, memory-stress, container-kill, dependency-failure]
+        targetService:
+          type: string
+        duration:
+          type: integer
+          default: 60
+        config:
+          type: object
+
+    DatabaseBranch:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        parentId:
+          type: string
+        databaseId:
+          type: string
+        status:
+          type: string
+          enum: [creating, ready, syncing, merging, deleted]
+        connectionString:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        lastSyncedAt:
+          type: string
+          format: date-time
+
+    CreateDatabaseBranchInput:
+      type: object
+      required: [name, databaseId]
+      properties:
+        name:
+          type: string
+        databaseId:
+          type: string
+        parentBranchId:
+          type: string
+
+    SystemHealth:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        uptime:
+          type: string
+        containers:
+          type: object
+          properties:
+            running:
+              type: integer
+            total:
+              type: integer
+        components:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              status:
+                type: string
+              cpu:
+                type: string
+              memory:
+                type: string
+              version:
+                type: string
+
+    SelfDeployment:
+      type: object
+      properties:
+        id:
+          type: string
+        fromVersion:
+          type: string
+        toVersion:
+          type: string
+        strategy:
+          type: string
+          enum: [rolling, blue-green, canary]
+        status:
+          type: string
+          enum: [pending, in-progress, completed, failed, rolled-back]
+        components:
+          type: array
+          items:
+            type: string
+        progress:
+          type: object
+          properties:
+            percentage:
+              type: integer
+            phase:
+              type: string
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+
+    AIAnalysisResult:
+      type: object
+      properties:
+        framework:
+          type: object
+          properties:
+            framework:
+              type: string
+            language:
+              type: string
+            confidence:
+              type: integer
+            version:
+              type: string
+            packageManager:
+              type: string
+        security:
+          type: object
+          properties:
+            score:
+              type: integer
+            issues:
+              type: array
+              items:
+                type: object
+                properties:
+                  severity:
+                    type: string
+                  message:
+                    type: string
+        performance:
+          type: object
+          properties:
+            score:
+              type: integer
+            recommendations:
+              type: array
+              items:
+                type: object
+                properties:
+                  title:
+                    type: string
+                  description:
+                    type: string
+        resourceRecommendations:
+          type: object
+          properties:
+            tier:
+              type: string
+            cpu:
+              type: string
+            memory:
+              type: string
+            replicas:
+              type: integer
+            estimatedCost:
+              type: number
+        buildOptimizations:
+          type: object
+          properties:
+            caching:
+              type: array
+              items:
+                type: string
+            parallelization:
+              type: array
+              items:
+                type: string
+            layerOptimization:
+              type: array
+              items:
+                type: string
