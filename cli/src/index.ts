@@ -102,8 +102,8 @@ async function showAnimatedHelp(): Promise<void> {
   }
   console.log('');
   
-  // Coming soon sections
-  console.log(`  ${style.purple('Projects')} ${style.dim('(coming soon)')}`);
+  // Projects
+  console.log(`  ${style.purple('Projects')}`);
   await sleep(20);
   const projectCommands = [
     ['init', 'Initialize a new project'],
@@ -111,32 +111,35 @@ async function showAnimatedHelp(): Promise<void> {
     ['link', 'Link current directory'],
   ];
   for (const [cmd, desc] of projectCommands) {
-    console.log(`    ${style.dim('>')} ${style.dim(cmd.padEnd(12))} ${style.dim(desc)}`);
+    console.log(`    ${style.blue('>')} ${style.purple(cmd.padEnd(12))} ${style.blueLight(desc)}`);
     await sleep(15);
   }
   console.log('');
   
-  console.log(`  ${style.purple('Deployments')} ${style.dim('(coming soon)')}`);
+  // Deployments
+  console.log(`  ${style.purple('Deployments')}`);
   await sleep(20);
   const deployCommands = [
     ['deploy', 'Deploy your project'],
     ['logs', 'View deployment logs'],
     ['status', 'Check deployment status'],
+    ['rollback', 'Rollback to previous version'],
   ];
   for (const [cmd, desc] of deployCommands) {
-    console.log(`    ${style.dim('>')} ${style.dim(cmd.padEnd(12))} ${style.dim(desc)}`);
+    console.log(`    ${style.blue('>')} ${style.purple(cmd.padEnd(12))} ${style.blueLight(desc)}`);
     await sleep(15);
   }
   console.log('');
   
-  console.log(`  ${style.purple('Environment')} ${style.dim('(coming soon)')}`);
+  // Environment
+  console.log(`  ${style.purple('Environment')}`);
   await sleep(20);
   const envCommands = [
     ['env', 'Manage environment variables'],
     ['domains', 'Manage custom domains'],
   ];
   for (const [cmd, desc] of envCommands) {
-    console.log(`    ${style.dim('>')} ${style.dim(cmd.padEnd(12))} ${style.dim(desc)}`);
+    console.log(`    ${style.blue('>')} ${style.purple(cmd.padEnd(12))} ${style.blueLight(desc)}`);
     await sleep(15);
   }
   console.log('');
@@ -205,30 +208,31 @@ program.configureHelp({
     output.push(style.purpleBright('  COMMANDS'));
     output.push('');
     output.push(`  ${style.purple('Authentication')}`);
-    output.push(`    ${style.blue('>')} ${style.purple('login')}       ${style.blue('Authenticate with Zyphron')}`);
-    output.push(`    ${style.blue('>')} ${style.purple('logout')}      ${style.blue('Log out from Zyphron')}`);
-    output.push(`    ${style.blue('>')} ${style.purple('register')}    ${style.blue('Create a new account')}`);
-    output.push(`    ${style.blue('>')} ${style.purple('whoami')}      ${style.blue('Display current user')}`);
+    output.push(`    ${style.blue('>')} ${style.purple('login')}       ${style.blueLight('Authenticate with Zyphron')}`);
+    output.push(`    ${style.blue('>')} ${style.purple('logout')}      ${style.blueLight('Log out from Zyphron')}`);
+    output.push(`    ${style.blue('>')} ${style.purple('register')}    ${style.blueLight('Create a new account')}`);
+    output.push(`    ${style.blue('>')} ${style.purple('whoami')}      ${style.blueLight('Display current user')}`);
     output.push('');
-    output.push(`  ${style.purple('Projects')} ${style.dim('(coming soon)')}`);
-    output.push(`    ${style.dim('>')} ${style.dim('init')}        Initialize a new project`);
-    output.push(`    ${style.dim('>')} ${style.dim('projects')}    List all projects`);
-    output.push(`    ${style.dim('>')} ${style.dim('link')}        Link current directory`);
+    output.push(`  ${style.purple('Projects')}`);
+    output.push(`    ${style.blue('>')} ${style.purple('init')}        ${style.blueLight('Initialize a new project')}`);
+    output.push(`    ${style.blue('>')} ${style.purple('projects')}    ${style.blueLight('List all projects')}`);
+    output.push(`    ${style.blue('>')} ${style.purple('link')}        ${style.blueLight('Link current directory')}`);
     output.push('');
-    output.push(`  ${style.purple('Deployments')} ${style.dim('(coming soon)')}`);
-    output.push(`    ${style.dim('>')} ${style.dim('deploy')}      Deploy your project`);
-    output.push(`    ${style.dim('>')} ${style.dim('logs')}        View deployment logs`);
-    output.push(`    ${style.dim('>')} ${style.dim('status')}      Check deployment status`);
+    output.push(`  ${style.purple('Deployments')}`);
+    output.push(`    ${style.blue('>')} ${style.purple('deploy')}      ${style.blueLight('Deploy your project')}`);
+    output.push(`    ${style.blue('>')} ${style.purple('logs')}        ${style.blueLight('View deployment logs')}`);
+    output.push(`    ${style.blue('>')} ${style.purple('status')}      ${style.blueLight('Check deployment status')}`);
+    output.push(`    ${style.blue('>')} ${style.purple('rollback')}    ${style.blueLight('Rollback to previous version')}`);
     output.push('');
-    output.push(`  ${style.purple('Environment')} ${style.dim('(coming soon)')}`);
-    output.push(`    ${style.dim('>')} ${style.dim('env')}         Manage environment variables`);
-    output.push(`    ${style.dim('>')} ${style.dim('domains')}     Manage custom domains`);
+    output.push(`  ${style.purple('Environment')}`);
+    output.push(`    ${style.blue('>')} ${style.purple('env')}         ${style.blueLight('Manage environment variables')}`);
+    output.push(`    ${style.blue('>')} ${style.purple('domains')}     ${style.blueLight('Manage custom domains')}`);
     output.push('');
     
     // Options
     output.push(style.purpleBright('  OPTIONS'));
-    output.push(`    ${style.purple('-v, --version')}    ${style.blue('Output the current version')}`);
-    output.push(`    ${style.purple('-h, --help')}       ${style.blue('Display help for command')}`);
+    output.push(`    ${style.purple('-v, --version')}    ${style.blueLight('Output the current version')}`);
+    output.push(`    ${style.purple('-h, --help')}       ${style.blueLight('Display help for command')}`);
     output.push('');
     
     // Examples
