@@ -61,3 +61,15 @@ export function useDeleteProject() {
     },
   });
 }
+
+export function useDeployProject() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ slug, branch }: { slug: string; branch?: string }) => 
+      projectsApi.deploy(slug, { branch }),
+    onSuccess: (_, { slug }) => {
+      queryClient.invalidateQueries({ queryKey: projectKeys.detail(slug) });
+    },
+  });
+}

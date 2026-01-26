@@ -64,3 +64,20 @@ export function useCancelDeployment(projectSlug: string) {
     },
   });
 }
+
+export function useRollback(projectSlug: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (deploymentId: string) => {
+      // Rollback creates a new deployment from a previous one
+      const deployment = await projectsApi.getDeployment(projectSlug, deploymentId);
+      return projectsApi.deploy(projectSlug, { 
+        branch: deployment.data.branch,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: deploymentKeys.list(projectSlug) });
+    },
+  });
+}

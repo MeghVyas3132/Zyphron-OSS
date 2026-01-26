@@ -8,3 +8,13 @@ export * from './use-domains';
 export * from './use-webhooks';
 export * from './use-teams';
 export * from './use-api-keys';
+export * from './use-github';
+
+// Phase 3 - Enterprise Features
+export * from './use-cloud';
+export * from './use-observability';
+export * from './use-chaos';
+export * from './use-edge';
+export * from './use-db-branching';
+export * from './use-strategies';
+export * from './use-self-deploy';

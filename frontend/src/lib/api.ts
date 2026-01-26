@@ -1,4 +1,4 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
 export class ApiError extends Error {
   status: number;
@@ -222,16 +222,26 @@ export interface Project {
   id: string;
   name: string;
   slug: string;
-  framework: string;
-  gitUrl: string;
-  defaultBranch: string;
+  framework: string | null;
+  repositoryUrl: string;
+  branch: string;
   productionUrl: string | null;
-  rootDirectory: string;
+  rootDirectory: string | null;
   buildCommand: string | null;
   outputDirectory: string | null;
   installCommand: string | null;
+  startCommand: string | null;
+  subdomain: string | null;
+  customDomain: string | null;
+  autoDeploy: boolean;
   createdAt: string;
   updatedAt: string;
+  deploymentCount?: number;
+  latestDeployment?: {
+    id: string;
+    status: string;
+    createdAt: string;
+  } | null;
   _count?: {
     deployments: number;
   };
@@ -239,10 +249,15 @@ export interface Project {
 
 export interface CreateProjectInput {
   name: string;
-  slug: string;
-  gitUrl: string;
-  defaultBranch?: string;
+  slug?: string;
+  repositoryUrl: string;
+  branch?: string;
   rootDirectory?: string;
+  buildCommand?: string;
+  installCommand?: string;
+  startCommand?: string;
+  outputDirectory?: string;
+  autoDeploy?: boolean;
 }
 
 export interface UpdateProjectInput {
