@@ -15,7 +15,12 @@ import {
   Sun,
   Bell,
   Search,
-  Plus
+  Plus,
+  Cloud,
+  Activity,
+  FlaskConical,
+  GitBranch,
+  Rocket
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { Button } from '@/components/ui/button';
@@ -24,7 +29,15 @@ import { cn } from '@/lib/utils';
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { name: 'Projects', href: '/projects', icon: FolderKanban },
+  { name: 'AI Insights', href: '/ai', icon: Zap },
   { name: 'Databases', href: '/databases', icon: Database },
+  { name: 'Multi-Cloud', href: '/cloud', icon: Cloud },
+  { name: 'Edge Functions', href: '/edge', icon: Rocket },
+  { name: 'Strategies', href: '/strategies', icon: Rocket },
+  { name: 'Observability', href: '/observability', icon: Activity },
+  { name: 'Chaos Testing', href: '/chaos', icon: FlaskConical },
+  { name: 'DB Branches', href: '/db-branches', icon: GitBranch },
+  { name: 'Self-Deploy', href: '/self-deploy', icon: Zap },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 

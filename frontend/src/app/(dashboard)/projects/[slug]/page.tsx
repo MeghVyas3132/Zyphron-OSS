@@ -332,18 +332,18 @@ export default function ProjectDetailPage() {
               <div>
                 <p className="text-sm text-muted-foreground">Repository</p>
                 <a
-                  href={project.gitUrl}
+                  href={project.repositoryUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="font-medium hover:text-primary flex items-center gap-1"
                 >
-                  {project.gitUrl}
+                  {project.repositoryUrl}
                   <ExternalLink className="h-3 w-3" />
                 </a>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Production Branch</p>
-                <p className="font-medium">{project.defaultBranch}</p>
+                <p className="font-medium">{project.branch}</p>
               </div>
             </div>
           </div>

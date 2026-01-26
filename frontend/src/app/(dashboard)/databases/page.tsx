@@ -7,7 +7,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { formatRelativeTime } from '@/lib/utils';
 import { useDatabases } from '@/hooks/use-databases';
+import { CreateDatabaseModal } from '@/components/databases/create-database-modal';
 import type { DatabaseInstance } from '@/lib/api';
+
+type StatusKey = 'CREATING' | 'RUNNING' | 'STOPPED' | 'FAILED';
 
 const dbTypeConfig = {
   POSTGRESQL: { icon: '🐘', color: 'text-blue-500', label: 'PostgreSQL' },
@@ -25,6 +28,7 @@ const statusConfig = {
 
 export default function DatabasesPage() {
   const [search, setSearch] = useState('');
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const { data, isLoading, isError, error, refetch } = useDatabases();
 
   const databases = data?.data || [];
@@ -72,12 +76,10 @@ export default function DatabasesPage() {
           <Button onClick={() => refetch()} variant="outline" size="icon">
             <RefreshCw className="h-4 w-4" />
           </Button>
-          <Link href="/databases/new">
-            <Button className="gap-2">
-              <Plus className="h-4 w-4" />
-              New Database
-            </Button>
-          </Link>
+          <Button className="gap-2" onClick={() => setShowCreateModal(true)}>
+            <Plus className="h-4 w-4" />
+            New Database
+          </Button>
         </div>
       </div>
 
@@ -100,9 +102,9 @@ export default function DatabasesPage() {
             {search ? 'No databases found matching your search' : 'No databases yet'}
           </p>
           {!search && (
-            <Link href="/databases/new">
-              <Button className="mt-4">Create Your First Database</Button>
-            </Link>
+            <Button className="mt-4" onClick={() => setShowCreateModal(true)}>
+              Create Your First Database
+            </Button>
           )}
         </div>
       ) : (
@@ -112,6 +114,13 @@ export default function DatabasesPage() {
           ))}
         </div>
       )}
+
+      {/* Create Database Modal */}
+      <CreateDatabaseModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onSuccess={() => refetch()}
+      />
     </div>
   );
 }

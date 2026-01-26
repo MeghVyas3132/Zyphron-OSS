@@ -34,7 +34,11 @@ export default function ProjectsPage() {
   const [search, setSearch] = useState('');
   const { data, isLoading, isError, error, refetch } = useProjects();
 
-  const projects = data?.data || [];
+  // Handle nested data structure: data.data.projects or data.data (array) or empty array
+  const projectsData = data?.data;
+  const projects: Project[] = Array.isArray(projectsData) 
+    ? projectsData 
+    : (projectsData?.projects || []);
   
   const filteredProjects = projects.filter(
     (project) =>
@@ -146,7 +150,7 @@ function ProjectCard({ project }: { project: Project }) {
         <div className="mt-4 space-y-2">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <GitBranch className="h-4 w-4" />
-            <span>{project.defaultBranch || 'main'}</span>
+            <span>{project.branch || 'main'}</span>
           </div>
 
           {project.productionUrl && (
