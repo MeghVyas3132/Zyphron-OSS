@@ -73,7 +73,7 @@ export async function websocketRoutes(app: FastifyInstance) {
   await subscriber.psubscribe(`${CHANNELS.PROJECT_EVENTS}*`);
 
   // Handle incoming Redis messages
-  subscriber.on('pmessage', (pattern, channel, message) => {
+  subscriber.on('pmessage', (_pattern: string, channel: string, message: string) => {
     try {
       const data = JSON.parse(message);
       broadcastToSubscribers(channel, data);
@@ -128,13 +128,13 @@ export async function websocketRoutes(app: FastifyInstance) {
       sendMessage(connection.socket, {
         type: 'build_logs_history',
         payload: {
-          logs: existingLogs.map(l => JSON.parse(l)),
+          logs: existingLogs.map((l: string) => JSON.parse(l)),
         },
       });
     }
 
     // Handle incoming messages
-    connection.socket.on('message', async (rawMessage) => {
+    connection.socket.on('message', async (rawMessage: Buffer) => {
       try {
         const message = JSON.parse(rawMessage.toString());
         await handleMessage(client, message);
@@ -154,7 +154,85 @@ export async function websocketRoutes(app: FastifyInstance) {
     });
 
     // Handle errors
-    connection.socket.on('error', (error) => {
+    connection.socket.on('error', (error: Error) => {
+      logger.error({ error, clientId }, 'WebSocket error');
+      clients.delete(clientId);
+    });
+  });
+
+  // ===========================================
+  // DEPLOYMENT LOGS WEBSOCKET (alias for builds)
+  // ===========================================
+
+  app.get('/ws/deployments/:deploymentId/logs', { websocket: true }, async (connection, req) => {
+    const { deploymentId } = req.params as { deploymentId: string };
+    const clientId = generateClientId();
+
+    logger.info({ clientId, deploymentId }, 'WebSocket client connected for deployment logs');
+
+    // Verify deployment exists and user has access
+    const deployment = await prisma.deployment.findUnique({
+      where: { id: deploymentId },
+      include: { project: true },
+    });
+
+    if (!deployment) {
+      connection.socket.close(4004, 'Deployment not found');
+      return;
+    }
+
+    // Register client
+    const client: WsClient = {
+      ws: connection.socket,
+      userId: 'anonymous', // TODO: Extract from JWT
+      deploymentId,
+      subscriptions: new Set([`${CHANNELS.BUILD_LOGS}${deploymentId}`]),
+    };
+    clients.set(clientId, client);
+
+    // Send connection acknowledgment
+    sendMessage(connection.socket, {
+      type: 'connected',
+      payload: {
+        clientId,
+        deploymentId,
+        status: deployment.status,
+      },
+    });
+
+    // Send existing build logs if available
+    const existingLogs = await redis.lrange(`logs:${deploymentId}`, 0, -1);
+    if (existingLogs.length > 0) {
+      sendMessage(connection.socket, {
+        type: 'build_logs_history',
+        payload: {
+          logs: existingLogs.map((l: string) => JSON.parse(l)),
+        },
+      });
+    }
+
+    // Handle incoming messages
+    connection.socket.on('message', async (rawMessage: Buffer) => {
+      try {
+        const message = JSON.parse(rawMessage.toString());
+        await handleMessage(client, message);
+      } catch (error) {
+        logger.error({ error, clientId }, 'Failed to handle WebSocket message');
+        sendMessage(connection.socket, {
+          type: 'error',
+          payload: { message: 'Invalid message format' },
+        });
+      }
+    });
+
+    // Handle disconnect
+    connection.socket.on('close', () => {
+      logger.info({ clientId, deploymentId }, 'WebSocket client disconnected');
+      clients.delete(clientId);
+    });
+
+    // Handle errors
+    connection.socket.on('error', (error: Error) => {
       logger.error({ error, clientId }, 'WebSocket error');
       clients.delete(clientId);
     });
@@ -210,7 +288,7 @@ export async function websocketRoutes(app: FastifyInstance) {
   // GENERAL EVENTS WEBSOCKET
   // ===========================================
 
-  app.get('/ws', { websocket: true }, async (connection, req) => {
+  app.get('/ws', { websocket: true }, async (connection, _req) => {
     const clientId = generateClientId();
 
     logger.info({ clientId }, 'WebSocket client connected');
@@ -227,7 +305,7 @@ export async function websocketRoutes(app: FastifyInstance) {
       payload: { clientId },
     });
 
-    connection.socket.on('message', async (rawMessage) => {
+    connection.socket.on('message', async (rawMessage: Buffer) => {
       try {
         const message = JSON.parse(rawMessage.toString());
         await handleMessage(client, message);
