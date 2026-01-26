@@ -89,6 +89,51 @@ export function useDeploymentMetrics(deploymentId: string) {
   });
 }
 
+// Generic metrics hook for project-level metrics
+export function useMetrics(params: { projectId: string; range?: string }) {
+  return useQuery({
+    queryKey: ['observability', 'metrics', 'project', params.projectId, params.range],
+    queryFn: async () => {
+      const searchParams = new URLSearchParams();
+      if (params.range) searchParams.set('range', params.range);
+      const data = await obsApi<{ metrics: DeploymentMetrics[] }>(
+        `/projects/${params.projectId}/metrics?${searchParams.toString()}`
+      );
+      return data.metrics;
+    },
+    enabled: !!params.projectId,
+    refetchInterval: 30000,
+  });
+}
+
+// Traces hook
+export function useTraces(params: { projectId: string; limit?: number }) {
+  return useQuery({
+    queryKey: ['observability', 'traces', params.projectId, params.limit],
+    queryFn: async () => {
+      const searchParams = new URLSearchParams();
+      if (params.limit) searchParams.set('limit', String(params.limit));
+      const data = await obsApi<{ traces: unknown[] }>(
+        `/projects/${params.projectId}/traces?${searchParams.toString()}`
+      );
+      return data.traces;
+    },
+    enabled: !!params.projectId,
+  });
+}
+
+// Alerts hook (alias for useProjectAlerts)
+export function useAlerts(projectId: string) {
+  return useQuery({
+    queryKey: ['observability', 'alerts', projectId],
+    queryFn: async () => {
+      const data = await obsApi<{ alerts: Alert[] }>(`/projects/${projectId}/alerts`);
+      return data.alerts;
+    },
+    enabled: !!projectId,
+  });
+}
+
 // ===========================================
 // ALERTS HOOKS
 // ===========================================

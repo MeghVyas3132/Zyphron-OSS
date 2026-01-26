@@ -95,6 +95,62 @@ export function useCloudResources(projectId: string) {
   });
 }
 
+// Cloud deployments hook
+export function useCloudDeployments() {
+  return useQuery({
+    queryKey: ['cloud', 'deployments'],
+    queryFn: async () => {
+      const data = await cloudApi<{ deployments: CloudResource[] }>('/deployments');
+      return data.deployments;
+    },
+  });
+}
+
+// Deploy to cloud mutation
+export function useDeployToCloud() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (params: {
+      projectId: string;
+      image: string;
+      provider: CloudProvider;
+      region: string;
+      resources: { cpu: string; memory: string; replicas?: number };
+      env?: Record<string, string>;
+    }) => {
+      return cloudApi<{ success: boolean; resource: CloudResource }>('/deploy', {
+        method: 'POST',
+        body: JSON.stringify(params),
+      });
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['cloud', 'resources', variables.projectId] });
+      queryClient.invalidateQueries({ queryKey: ['cloud', 'deployments'] });
+    },
+  });
+}
+
+// Scale deployment mutation
+export function useScaleDeployment() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (params: {
+      deploymentId: string;
+      replicas: number;
+    }) => {
+      return cloudApi<{ success: boolean }>(`/deployments/${params.deploymentId}/scale`, {
+        method: 'POST',
+        body: JSON.stringify({ replicas: params.replicas }),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cloud', 'deployments'] });
+    },
+  });
+}
+
 export function useCloudDeploy() {
   const queryClient = useQueryClient();
 

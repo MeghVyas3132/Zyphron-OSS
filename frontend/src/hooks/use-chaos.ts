@@ -117,6 +117,9 @@ export function useProjectExperiments(projectId: string) {
   });
 }
 
+// Alias for useChaosExperiments
+export const useChaosExperiments = useProjectExperiments;
+
 export function useExperiment(experimentId: string) {
   return useQuery({
     queryKey: ['chaos', 'experiment', experimentId],

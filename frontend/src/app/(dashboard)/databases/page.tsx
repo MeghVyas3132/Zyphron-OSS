@@ -31,7 +31,7 @@ export default function DatabasesPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const { data, isLoading, isError, error, refetch } = useDatabases();
 
-  const databases = data?.data || [];
+  const databases = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
   
   const filteredDatabases = databases.filter(
     (db) =>
