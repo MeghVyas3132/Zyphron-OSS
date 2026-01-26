@@ -19,6 +19,9 @@ import { getRedisClient } from '@/lib/redis.js';
 // Routes
 import { healthRoutes } from '@/routes/health.js';
 import { authRoutes } from '@/routes/auth.js';
+import { githubRoutes } from '@/routes/github.js';
+import { aiRoutes } from '@/routes/ai.js';
+import { previewRoutes } from '@/routes/previews.js';
 import { projectRoutes } from '@/routes/projects.js';
 import { deploymentRoutes } from '@/routes/deployments.js';
 import { serviceRoutes } from '@/routes/services.js';
@@ -31,6 +34,13 @@ import { domainRoutes } from '@/routes/domains.js';
 import { teamRoutes } from '@/routes/teams.js';
 import { apiKeyRoutes } from '@/routes/api-keys.js';
 import { auditRoutes } from '@/routes/audit.js';
+import { cloudRoutes } from '@/routes/cloud.js';
+import { strategiesRoutes } from '@/routes/strategies.js';
+import { edgeRoutes } from '@/routes/edge.js';
+import { observabilityRoutes } from '@/routes/observability.js';
+import { chaosRoutes } from '@/routes/chaos.js';
+import { dbBranchingRoutes } from '@/routes/db-branching.js';
+import selfDeployRoutes from '@/routes/self-deploy.js';
 
 // ===========================================
 // CREATE APPLICATION
@@ -253,6 +263,9 @@ export async function createApp(): Promise<FastifyInstance> {
 
   await app.register(healthRoutes, { prefix: '/health' });
   await app.register(authRoutes, { prefix: '/api/v1/auth' });
+  await app.register(githubRoutes, { prefix: '/api/v1/github' });
+  await app.register(aiRoutes, { prefix: '/api/v1/ai' });
+  await app.register(previewRoutes, { prefix: '/api/v1/previews' });
   await app.register(projectRoutes, { prefix: '/api/v1/projects' });
   await app.register(deploymentRoutes, { prefix: '/api/v1' });  // Has /projects/:id/deployments and /deployments/:id routes
   await app.register(serviceRoutes, { prefix: '/api/v1' });  // Services under /api/v1/projects/:projectId/services
@@ -264,6 +277,13 @@ export async function createApp(): Promise<FastifyInstance> {
   await app.register(teamRoutes, { prefix: '/api/v1/teams' });
   await app.register(apiKeyRoutes, { prefix: '/api/v1/api-keys' });
   await app.register(auditRoutes, { prefix: '/api/v1/audit' });
+  await app.register(cloudRoutes, { prefix: '/api/v1/cloud' });
+  await app.register(strategiesRoutes, { prefix: '/api/v1' });
+  await app.register(edgeRoutes, { prefix: '/api/v1/edge' });
+  await app.register(observabilityRoutes, { prefix: '/api/v1/observability' });
+  await app.register(chaosRoutes, { prefix: '/api/v1/chaos' });
+  await app.register(dbBranchingRoutes, { prefix: '/api/v1' });
+  await app.register(selfDeployRoutes, { prefix: '/api/v1/self-deploy' });
   await app.register(websocketRoutes);
 
   return app;

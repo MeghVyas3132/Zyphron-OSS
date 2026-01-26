@@ -41,3 +41,33 @@ export {
   type ContainerInfo,
   type HealthCheckConfig,
 } from './deployer/index.js';
+
+// AI Service - Project analysis and recommendations
+export { aiEngine } from './ai/index.js';
+
+// Caching Service - Smart build caching
+export { cachingService, cacheKeyGenerator } from './caching/index.js';
+
+// Multi-Cloud Service - Multi-provider deployments
+export { multiCloudService } from './cloud/index.js';
+
+// Deployment Strategies - Rolling, Blue-Green, Canary
+export { deploymentStrategiesService } from './strategies/index.js';
+
+// Database Branching - Branch databases for previews
+export { databaseBranchingService } from './database/branching.js';
+
+// Edge Functions - Serverless at the edge
+export { edgeFunctionsService } from './edge/index.js';
+
+// Observability - Metrics, Tracing, Alerts
+export { observabilityService } from './observability/index.js';
+
+// Chaos Engineering - Resilience testing
+export { chaosEngineeringService } from './chaos/index.js';
+
+// Preview Environments - PR-based previews
+export { PreviewEnvironmentService } from './preview/index.js';
+
+// Self-Deployment - Zyphron on Zyphron
+export { selfDeploymentService } from './self-deploy/index.js';
