@@ -15,13 +15,6 @@ services:
       - NEXT_PUBLIC_API_URL=http://api.localhost
       - NEXT_PUBLIC_APP_URL=http://app.localhost
     volumes:
-      - ./frontend/src:/app/src
-      - ./frontend/public:/app/public
-      - ./frontend/package.json:/app/package.json
-      - ./frontend/next.config.js:/app/next.config.js
-      - ./frontend/tailwind.config.ts:/app/tailwind.config.ts
-      - ./frontend/tsconfig.json:/app/tsconfig.json
-      - ./frontend/postcss.config.js:/app/postcss.config.js
       - frontend_node_modules:/app/node_modules
       - frontend_next:/app/.next
     networks:
@@ -81,15 +74,11 @@ services:
       - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
       - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
       - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
-      - CONTAINER_REGISTRY=registry:5000
+      - CONTAINER_REGISTRY=localhost:5050
       - PROJECTS_DIR=/var/www/projects
       - BASE_DOMAIN=localhost
       - LOG_LEVEL=debug
     volumes:
-      - ./backend/src:/app/src:ro
-      - ./backend/package.json:/app/package.json:ro
-      - ./backend/tsconfig.json:/app/tsconfig.json:ro
-      - ./backend/prisma:/app/prisma:ro
       - projects_data:/var/www/projects
       - /var/run/docker.sock:/var/run/docker.sock  # Docker-in-Docker for builds
     depends_on:
@@ -129,15 +118,11 @@ services:
       - KAFKA_BROKERS=kafka:9092
       - DATABASE_URL=postgresql://zyphron:zyphron_secret@postgres:5432/zyphron?schema=public
       - PROJECTS_DIR=/var/www/projects
-      - CONTAINER_REGISTRY=registry:5000
+      - CONTAINER_REGISTRY=localhost:5050
       - BASE_DOMAIN=localhost
       - LOG_LEVEL=debug
       - JWT_SECRET=dev-jwt-secret-change-in-production-minimum-32-chars
     volumes:
-      - ./backend/src:/app/src:ro
-      - ./backend/package.json:/app/package.json:ro
-      - ./backend/tsconfig.json:/app/tsconfig.json:ro
-      - ./backend/prisma:/app/prisma:ro
       - projects_data:/var/www/projects
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:

@@ -186,6 +186,10 @@ export async function createApp(): Promise<FastifyInstance> {
 
     try {
       await request.jwtVerify();
+      // Map 'sub' to 'id' for consistent user access in routes
+      if (request.user && 'sub' in request.user) {
+        (request.user as unknown as { id: string }).id = (request.user as unknown as { sub: string }).sub;
+      }
     } catch (err) {
       reply.status(401).send({
         success: false,

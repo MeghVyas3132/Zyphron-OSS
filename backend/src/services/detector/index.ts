@@ -162,7 +162,7 @@ const reactDetector: FrameworkDetector = {
       startCommand: scripts.start || (isVite ? 'vite preview' : 'serve -s build'),
       outputDirectory,
       nodeVersion: packageJson.engines?.node || '20',
-      port: isVite ? 4173 : 3000,
+      port: 80, // React apps are served via nginx on port 80
       env: {},
       dockerfileExists: await fileExists(path.join(projectPath, 'Dockerfile')),
       confidence: 85,
@@ -198,7 +198,7 @@ const vueDetector: FrameworkDetector = {
       startCommand: scripts.preview || 'vite preview',
       outputDirectory: 'dist',
       nodeVersion: packageJson.engines?.node || '20',
-      port: 4173,
+      port: 80, // Vue apps are served via nginx on port 80
       env: {},
       dockerfileExists: await fileExists(path.join(projectPath, 'Dockerfile')),
       confidence: 85,

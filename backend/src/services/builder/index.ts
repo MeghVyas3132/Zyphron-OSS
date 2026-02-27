@@ -146,7 +146,7 @@ ${d.packageManager === 'pnpm' ? 'COPY pnpm-lock.yaml ./' : ''}
 RUN ${d.installCommand}
 
 COPY . .
-RUN ${d.buildCommand || 'npm run build'}
+RUN npm run build
 
 # Stage 2: Serve
 FROM nginx:alpine

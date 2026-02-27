@@ -44,29 +44,43 @@ const parallelDeployer = new ParallelMultiServiceDeployer(
 // ===========================================
 
 interface DeploymentEvent {
-  type: string;
+  eventType: string;
+  type?: string; // Legacy support
   deploymentId: string;
   buildId?: string;
-  projectId: string;
+  projectId?: string;
   userId?: string;
   environment?: string;
   branch?: string;
   commitSha?: string;
   timestamp: string;
+  data?: {
+    deploymentId: string;
+    projectId: string;
+    userId?: string;
+    environment?: string;
+    branch?: string;
+    repositoryUrl?: string;
+  };
 }
 
 async function handleDeploymentEvent(topic: string, message: unknown): Promise<void> {
   const event = message as DeploymentEvent;
+  const eventType = event.eventType || event.type; // Support both formats
+  
+  // Extract project info from nested data if present
+  const projectId = event.projectId || event.data?.projectId;
+  const deploymentId = event.deploymentId || event.data?.deploymentId;
   
   logger.info({
     topic,
-    type: event.type,
-    deploymentId: event.deploymentId,
-    projectId: event.projectId,
+    eventType,
+    deploymentId,
+    projectId,
   }, 'Processing deployment event');
 
   try {
-    switch (event.type) {
+    switch (eventType) {
       case 'DEPLOYMENT_CREATED':
         await handleDeploymentCreated(event);
         break;
@@ -84,7 +98,7 @@ async function handleDeploymentEvent(topic: string, message: unknown): Promise<v
         break;
 
       default:
-        logger.warn({ type: event.type }, 'Unknown deployment event type');
+        logger.warn({ eventType }, 'Unknown deployment event type');
     }
   } catch (error) {
     logger.error({ error, event }, 'Error processing deployment event');
@@ -103,7 +117,15 @@ async function handleDeploymentEvent(topic: string, message: unknown): Promise<v
 }
 
 async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
-  const { deploymentId, projectId } = event;
+  // Extract values from event, supporting nested data structure
+  const deploymentId = event.deploymentId || event.data?.deploymentId;
+  const projectId = event.data?.projectId || (event as unknown as { projectId?: string }).projectId;
+  const branch = event.data?.branch || (event as unknown as { branch?: string }).branch;
+  
+  if (!deploymentId || !projectId) {
+    logger.error({ event }, 'Missing deploymentId or projectId in event');
+    throw new Error('Missing deploymentId or projectId');
+  }
 
   logger.info({ deploymentId, projectId }, 'Starting deployment build');
 
@@ -156,7 +178,7 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
     const cloneResult = await gitService.cloneRepository(
       project.repositoryUrl,
       deploymentId,
-      event.branch || project.branch || 'main',
+      branch || project.branch || 'main',
       undefined // TODO: Add git token support
     );
 
@@ -806,14 +828,14 @@ async function handleDeploymentRollback(event: DeploymentEvent): Promise<void> {
     await prisma.deployment.update({
       where: { id: deploymentId },
       data: {
-        status: 'READY',
+        status: 'LIVE',
         completedAt: new Date(),
         url: `https://${project.subdomain}.${config.deployment.baseDomain}`,
       },
     });
 
     await publishLog(`✅ Rollback complete in ${(duration / 1000).toFixed(2)}s`, 'info', 'complete', 100);
-    await logPublisher.publishStatus(deploymentId, { status: 'READY', message: 'Rollback complete!' });
+    await logPublisher.publishStatus(deploymentId, { status: 'LIVE', message: 'Rollback complete!' });
     await logPublisher.publishComplete(deploymentId, {
       status: 'success',
       duration,
