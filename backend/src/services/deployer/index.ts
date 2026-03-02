@@ -316,7 +316,8 @@ export class DeployerService {
       });
 
       return () => {
-        stream.destroy();
+        const stoppable = stream as NodeJS.ReadableStream & { destroy?: () => void };
+        stoppable.destroy?.();
       };
     } catch (error) {
       logger.error({ container: containerNameOrId, error }, 'Failed to stream logs');
