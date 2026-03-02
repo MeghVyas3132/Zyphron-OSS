@@ -6,11 +6,11 @@ import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
+import { Github, Loader2, Lock, Mail, User } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Github, Loader2, Mail, Lock, User } from 'lucide-react';
-import { toast } from 'sonner';
 
 const registerSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters'),
@@ -56,11 +56,8 @@ export default function RegisterPage() {
       }
 
       const result = await response.json();
-      
-      // Store token
       localStorage.setItem('auth-token', result.data.token);
-      
-      toast.success('Account created successfully!');
+      toast.success('Account created');
       router.push('/dashboard');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Registration failed');
@@ -69,42 +66,35 @@ export default function RegisterPage() {
     }
   };
 
-  const handleGithubLogin = () => {
+  const handleGithubSignup = () => {
     setIsGithubLoading(true);
     window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/github`;
   };
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-2 text-center">
-        <h1 className="text-3xl font-bold">Create an account</h1>
-        <p className="text-muted-foreground">
-          Get started with Zyphron for free
-        </p>
+    <div className="space-y-7">
+      <div className="text-center space-y-2 stagger-in">
+        <p className="uppercase tracking-[0.2em] text-xs text-muted-foreground">Account Setup</p>
+        <h1 className="text-3xl font-semibold mono-text-gradient">Create Your Workspace</h1>
+        <p className="text-muted-foreground">Start shipping with deployment-grade infrastructure.</p>
       </div>
 
       <Button
         variant="outline"
-        className="w-full"
-        onClick={handleGithubLogin}
+        className="w-full h-11 rounded-xl"
+        onClick={handleGithubSignup}
         disabled={isGithubLoading}
       >
-        {isGithubLoading ? (
-          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-        ) : (
-          <Github className="mr-2 h-4 w-4" />
-        )}
+        {isGithubLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Github className="mr-2 h-4 w-4" />}
         Continue with GitHub
       </Button>
 
       <div className="relative">
         <div className="absolute inset-0 flex items-center">
-          <span className="w-full border-t" />
+          <span className="w-full border-t border-border/70" />
         </div>
-        <div className="relative flex justify-center text-xs uppercase">
-          <span className="bg-background px-2 text-muted-foreground">
-            Or continue with email
-          </span>
+        <div className="relative flex justify-center text-[11px] uppercase tracking-[0.18em]">
+          <span className="bg-card px-3 text-muted-foreground">or use email</span>
         </div>
       </div>
 
@@ -113,71 +103,39 @@ export default function RegisterPage() {
           <Label htmlFor="name">Full Name</Label>
           <div className="relative">
             <User className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-            <Input
-              id="name"
-              type="text"
-              placeholder="John Doe"
-              className="pl-10"
-              {...register('name')}
-            />
+            <Input id="name" type="text" placeholder="John Doe" className="pl-10 h-11 rounded-xl" {...register('name')} />
           </div>
-          {errors.name && (
-            <p className="text-sm text-destructive">{errors.name.message}</p>
-          )}
+          {errors.name && <p className="text-sm text-destructive">{errors.name.message}</p>}
         </div>
 
         <div className="space-y-2">
           <Label htmlFor="email">Email</Label>
           <div className="relative">
             <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-            <Input
-              id="email"
-              type="email"
-              placeholder="name@example.com"
-              className="pl-10"
-              {...register('email')}
-            />
+            <Input id="email" type="email" placeholder="name@example.com" className="pl-10 h-11 rounded-xl" {...register('email')} />
           </div>
-          {errors.email && (
-            <p className="text-sm text-destructive">{errors.email.message}</p>
-          )}
+          {errors.email && <p className="text-sm text-destructive">{errors.email.message}</p>}
         </div>
 
         <div className="space-y-2">
           <Label htmlFor="password">Password</Label>
           <div className="relative">
             <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-            <Input
-              id="password"
-              type="password"
-              placeholder="Create a password"
-              className="pl-10"
-              {...register('password')}
-            />
+            <Input id="password" type="password" placeholder="Create a password" className="pl-10 h-11 rounded-xl" {...register('password')} />
           </div>
-          {errors.password && (
-            <p className="text-sm text-destructive">{errors.password.message}</p>
-          )}
+          {errors.password && <p className="text-sm text-destructive">{errors.password.message}</p>}
         </div>
 
         <div className="space-y-2">
           <Label htmlFor="confirmPassword">Confirm Password</Label>
           <div className="relative">
             <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-            <Input
-              id="confirmPassword"
-              type="password"
-              placeholder="Confirm your password"
-              className="pl-10"
-              {...register('confirmPassword')}
-            />
+            <Input id="confirmPassword" type="password" placeholder="Confirm your password" className="pl-10 h-11 rounded-xl" {...register('confirmPassword')} />
           </div>
-          {errors.confirmPassword && (
-            <p className="text-sm text-destructive">{errors.confirmPassword.message}</p>
-          )}
+          {errors.confirmPassword && <p className="text-sm text-destructive">{errors.confirmPassword.message}</p>}
         </div>
 
-        <Button type="submit" className="w-full" disabled={isLoading}>
+        <Button type="submit" className="w-full h-11 rounded-xl" disabled={isLoading}>
           {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           Create Account
         </Button>
@@ -185,19 +143,8 @@ export default function RegisterPage() {
 
       <p className="text-center text-sm text-muted-foreground">
         Already have an account?{' '}
-        <Link href="/login" className="text-primary hover:underline">
+        <Link href="/login" className="text-foreground font-medium hover:opacity-70 transition-opacity">
           Sign in
-        </Link>
-      </p>
-
-      <p className="text-center text-xs text-muted-foreground">
-        By creating an account, you agree to our{' '}
-        <Link href="/terms" className="underline">
-          Terms of Service
-        </Link>{' '}
-        and{' '}
-        <Link href="/privacy" className="underline">
-          Privacy Policy
         </Link>
       </p>
     </div>
