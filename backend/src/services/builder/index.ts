@@ -448,7 +448,7 @@ venv
 
         this.docker.modem.followProgress(
           stream,
-          (err, res) => {
+          (err, _res) => {
             if (err) {
               reject(err);
               return;
@@ -540,7 +540,7 @@ venv
 
         this.docker.modem.followProgress(
           stream,
-          (err, res) => {
+          (err, _res) => {
             if (err) {
               reject(err);
               return;
