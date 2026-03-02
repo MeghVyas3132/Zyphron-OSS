@@ -6,7 +6,9 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma.js';
 import { createLogger } from '@/lib/logger.js';
+import { TEAM_ROLES_MANAGE, projectWhereForUser } from '@/lib/project-access.js';
 import { nanoid } from 'nanoid';
+import { createAuditLog } from '@/services/audit/index.js';
 
 const logger = createLogger('projects');
 
@@ -59,17 +61,21 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
     const query = querySchema.parse(request.query);
 
     const where = {
-      OR: [
-        { userId },
-        { team: { members: { some: { userId } } } },
+      AND: [
+        {
+          OR: [
+            { userId },
+            { team: { members: { some: { userId } } } },
+          ],
+        },
+        ...(query.search ? [{
+          OR: [
+            { name: { contains: query.search, mode: 'insensitive' as const } },
+            { subdomain: { contains: query.search, mode: 'insensitive' as const } },
+          ],
+        }] : []),
+        ...(query.teamId ? [{ teamId: query.teamId }] : []),
       ],
-      ...(query.search && {
-        OR: [
-          { name: { contains: query.search, mode: 'insensitive' as const } },
-          { subdomain: { contains: query.search, mode: 'insensitive' as const } },
-        ],
-      }),
-      ...(query.teamId && { teamId: query.teamId }),
     };
 
     const [projects, total] = await Promise.all([
@@ -137,6 +143,32 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const data = parseResult.data;
+    let teamId: string | undefined;
+
+    if (data.teamId) {
+      const team = await prisma.team.findFirst({
+        where: {
+          id: data.teamId,
+          OR: [
+            { ownerId: userId },
+            { members: { some: { userId, role: { in: TEAM_ROLES_MANAGE } } } },
+          ],
+        },
+        select: { id: true },
+      });
+
+      if (!team) {
+        return reply.status(403).send({
+          success: false,
+          error: {
+            code: 'TEAM_ACCESS_DENIED',
+            message: 'You do not have permission to create projects in this team',
+          },
+        });
+      }
+
+      teamId = team.id;
+    }
 
     // Generate unique subdomain
     const slug = data.name
@@ -170,11 +202,23 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
           autoDeploy: data.autoDeploy,
           subdomain,
           userId,
-          teamId: data.teamId,
+          teamId,
         },
       });
 
       logger.info({ projectId: project.id, userId }, 'Project created');
+      await createAuditLog({
+        userId,
+        action: 'project.create',
+        resourceType: 'project',
+        resourceId: project.id,
+        metadata: {
+          projectName: project.name,
+          slug: project.slug,
+          teamId: project.teamId,
+        },
+        request,
+      });
 
       const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
       const baseDomain = process.env.BASE_DOMAIN || 'localhost';
@@ -210,13 +254,7 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
     const { projectId } = request.params;
 
     const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        OR: [
-          { userId },
-          { team: { members: { some: { userId } } } },
-        ],
-      },
+      where: projectWhereForUser(projectId, userId),
       include: {
         deployments: {
           take: 10,
@@ -281,13 +319,7 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
 
     // Check access
     const existing = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        OR: [
-          { userId },
-          { team: { members: { some: { userId, role: { in: ['OWNER', 'ADMIN'] } } } } },
-        ],
-      },
+      where: projectWhereForUser(projectId, userId, ['OWNER', 'ADMIN']),
     });
 
     if (!existing) {
@@ -301,11 +333,21 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const project = await prisma.project.update({
-      where: { id: projectId },
+      where: { id: existing.id },
       data: parseResult.data,
     });
 
-    logger.info({ projectId, userId }, 'Project updated');
+    logger.info({ projectId: existing.id, userId }, 'Project updated');
+    await createAuditLog({
+      userId,
+      action: 'project.update',
+      resourceType: 'project',
+      resourceId: existing.id,
+      metadata: {
+        changedFields: Object.keys(parseResult.data),
+      },
+      request,
+    });
 
     return reply.send({
       success: true,
@@ -323,8 +365,16 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
     // Check access (only owner can delete)
     const existing = await prisma.project.findFirst({
       where: {
-        id: projectId,
-        userId, // Only project owner can delete
+        AND: [
+          { userId }, // Only project owner can delete
+          {
+            OR: [
+              { id: projectId },
+              { slug: projectId },
+              { subdomain: projectId },
+            ],
+          },
+        ],
       },
     });
 
@@ -340,10 +390,17 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
 
     // Delete project (cascade will handle related records)
     await prisma.project.delete({
-      where: { id: projectId },
+      where: { id: existing.id },
     });
 
-    logger.info({ projectId, userId }, 'Project deleted');
+    logger.info({ projectId: existing.id, userId }, 'Project deleted');
+    await createAuditLog({
+      userId,
+      action: 'project.delete',
+      resourceType: 'project',
+      resourceId: existing.id,
+      request,
+    });
 
     return reply.send({
       success: true,
