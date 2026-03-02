@@ -7,6 +7,7 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { aiEngine } from '../services/ai/index.js';
 import { createLogger } from '../lib/logger.js';
+import { getGitHubToken } from '../lib/github-token.js';
 
 const logger = createLogger('ai-routes');
 
@@ -28,6 +29,16 @@ const analyzeProjectSchema = z.object({
 const analyzeRepoSchema = z.object({
   repoUrl: z.string().url(),
   branch: z.string().optional(),
+});
+
+const generateDockerfileSchema = z.object({
+  framework: z.string(),
+  language: z.string().optional(),
+  packageManager: z.string().optional(),
+  buildCommand: z.string().optional(),
+  startCommand: z.string().optional(),
+  port: z.number().optional(),
+  nodeVersion: z.string().optional(),
 });
 
 // ===========================================
@@ -94,9 +105,7 @@ export async function aiRoutes(app: FastifyInstance) {
       const repoName = repo.replace('.git', '');
 
       // Fetch repo data from GitHub
-      const { getRedisClient } = await import('../lib/redis.js');
-      const redis = getRedisClient();
-      const githubToken = await redis.get(`github:token:${user.id}`);
+      const githubToken = await getGitHubToken(user.id);
 
       if (!githubToken) {
         return reply.status(400).send({
@@ -356,15 +365,7 @@ export async function aiRoutes(app: FastifyInstance) {
   // ===========================================
   app.post('/generate-dockerfile', async (request, reply) => {
     try {
-      const body = z.object({
-        framework: z.string(),
-        language: z.string().optional(),
-        packageManager: z.string().optional(),
-        buildCommand: z.string().optional(),
-        startCommand: z.string().optional(),
-        port: z.number().optional(),
-        nodeVersion: z.string().optional(),
-      }).parse(request.body);
+      const body = generateDockerfileSchema.parse(request.body);
 
       const { dockerfileGenerator } = await import('../services/builder/dockerfile-generator.js');
 
@@ -398,6 +399,75 @@ export async function aiRoutes(app: FastifyInstance) {
       });
     } catch (error) {
       logger.error({ error }, 'Failed to generate Dockerfile');
+      return reply.status(400).send({
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to generate Dockerfile',
+      });
+    }
+  });
+
+  // Compatibility alias used by older clients/scripts
+  app.post('/dockerfile', async (request, reply) => {
+    try {
+      const body = z.object({
+        framework: z.string().optional(),
+        language: z.string().optional(),
+        packageManager: z.string().optional(),
+        buildCommand: z.string().optional(),
+        startCommand: z.string().optional(),
+        port: z.number().optional(),
+        nodeVersion: z.string().optional(),
+        repoUrl: z.string().url().optional(),
+      }).parse(request.body);
+
+      const fallbackFramework = (() => {
+        if (!body.repoUrl) return 'node';
+        if (body.repoUrl.includes('next')) return 'nextjs';
+        if (body.repoUrl.includes('django')) return 'django';
+        if (body.repoUrl.includes('fastapi')) return 'fastapi';
+        return 'node';
+      })();
+
+      const normalized = generateDockerfileSchema.parse({
+        framework: body.framework || fallbackFramework,
+        language: body.language,
+        packageManager: body.packageManager,
+        buildCommand: body.buildCommand,
+        startCommand: body.startCommand,
+        port: body.port,
+        nodeVersion: body.nodeVersion,
+      });
+
+      const { dockerfileGenerator } = await import('../services/builder/dockerfile-generator.js');
+      const detection = {
+        framework: normalized.framework as import('../services/detector/index.js').FrameworkType,
+        language: (normalized.language || 'javascript') as import('../services/detector/index.js').Language,
+        packageManager: (normalized.packageManager || 'npm') as import('../services/detector/index.js').PackageManager,
+        projectType: 'fullstack' as import('../services/detector/index.js').ProjectType,
+        buildCommand: normalized.buildCommand || null,
+        installCommand: normalized.packageManager === 'yarn' ? 'yarn install --frozen-lockfile' :
+                        normalized.packageManager === 'pnpm' ? 'pnpm install --frozen-lockfile' :
+                        'npm ci',
+        startCommand: normalized.startCommand || null,
+        outputDirectory: null,
+        nodeVersion: normalized.nodeVersion || '20',
+        port: normalized.port || 3000,
+        env: {},
+        dockerfileExists: false,
+        confidence: 100,
+      };
+      const result = dockerfileGenerator.generate(detection);
+
+      return reply.send({
+        success: true,
+        data: {
+          dockerfile: result.dockerfile,
+          dockerignore: result.dockerignore,
+          optimizations: result.optimizations,
+        },
+      });
+    } catch (error) {
+      logger.error({ error }, 'Failed to generate Dockerfile (compat endpoint)');
       return reply.status(400).send({
         success: false,
         message: error instanceof Error ? error.message : 'Failed to generate Dockerfile',

@@ -5,10 +5,8 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma.js';
-import { createLogger } from '@/lib/logger.js';
 import { getRedisClient } from '@/lib/redis.js';
-
-const logger = createLogger('metrics');
+import { projectWhereForUser } from '@/lib/project-access.js';
 
 // ===========================================
 // VALIDATION SCHEMAS
@@ -46,17 +44,6 @@ function getPeriodMs(period: string): number {
     case '7d': return 7 * 24 * 60 * 60 * 1000;
     case '30d': return 30 * 24 * 60 * 60 * 1000;
     default: return 24 * 60 * 60 * 1000;
-  }
-}
-
-function getGranularity(period: string): string {
-  switch (period) {
-    case '1h': return '1m';
-    case '6h': return '5m';
-    case '24h': return '1h';
-    case '7d': return '6h';
-    case '30d': return '1d';
-    default: return '1h';
   }
 }
 
@@ -171,13 +158,7 @@ export async function metricsRoutes(app: FastifyInstance): Promise<void> {
 
     // Check project access
     const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        OR: [
-          { userId },
-          { team: { members: { some: { userId } } } },
-        ],
-      },
+      where: projectWhereForUser(projectId, userId),
     });
 
     if (!project) {
@@ -201,16 +182,16 @@ export async function metricsRoutes(app: FastifyInstance): Promise<void> {
       recentDeployments,
     ] = await Promise.all([
       prisma.deployment.count({
-        where: { projectId, createdAt: { gte: since } },
+        where: { projectId: project.id, createdAt: { gte: since } },
       }),
       prisma.deployment.count({
-        where: { projectId, status: 'LIVE', createdAt: { gte: since } },
+        where: { projectId: project.id, status: 'LIVE', createdAt: { gte: since } },
       }),
       prisma.deployment.count({
-        where: { projectId, status: 'FAILED', createdAt: { gte: since } },
+        where: { projectId: project.id, status: 'FAILED', createdAt: { gte: since } },
       }),
       prisma.deployment.findMany({
-        where: { projectId, createdAt: { gte: since } },
+        where: { projectId: project.id, createdAt: { gte: since } },
         orderBy: { createdAt: 'desc' },
         take: 10,
         select: {
@@ -367,15 +348,10 @@ export async function metricsRoutes(app: FastifyInstance): Promise<void> {
   // ADMIN METRICS
   // ===========================================
 
-  // Admin system metrics (requires admin role)
-  // Note: Simplified for now - admin role check disabled in dev
+  // Admin system metrics (platform-level view)
   app.get('/admin/metrics', {
-    onRequest: [app.authenticate],
-  }, async (request: FastifyRequest, reply: FastifyReply) => {
-    const userId = request.user?.id as string;
-
-    // In dev mode, skip admin check
-    // In production, you'd check user.role === 'ADMIN'
+    onRequest: [app.authenticate, app.requireAdmin],
+  }, async (_request: FastifyRequest, reply: FastifyReply) => {
 
     const [
       totalUsers,
