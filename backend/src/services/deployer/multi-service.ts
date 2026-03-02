@@ -7,7 +7,6 @@ import Docker from 'dockerode';
 import { createLogger } from '../../lib/logger.js';
 import { MultiServiceConfig, ServiceDefinition } from '../detector/multi-service.js';
 import { BuilderService, getBuilderService } from '../builder/index.js';
-import { DeployerService, getDeployerService } from '../deployer/index.js';
 
 const logger = createLogger('multi-service-deployer');
 
@@ -206,10 +205,8 @@ const MANAGED_SERVICE_CONFIG: Record<string, {
 export class MultiServiceDeployer {
   private docker: Docker;
   private builder: BuilderService;
-  private deployer: DeployerService;
   private network: string;
   private domain: string;
-  private registryUrl: string;
 
   constructor(
     network: string = 'zyphron-network',
@@ -218,10 +215,8 @@ export class MultiServiceDeployer {
   ) {
     this.docker = new Docker();
     this.builder = getBuilderService(registryUrl);
-    this.deployer = getDeployerService(network, domain);
     this.network = network;
     this.domain = domain;
-    this.registryUrl = registryUrl;
   }
 
   // ===========================================
@@ -265,8 +260,7 @@ export class MultiServiceDeployer {
             service,
             envVars,
             serviceContainerMap,
-            serviceEnvMap,
-            deploymentId
+            serviceEnvMap
           );
 
           let result: ServiceDeployResult;
@@ -645,9 +639,9 @@ export class MultiServiceDeployer {
 
     // Also connect to main zyphron network for Traefik access
     try {
-      const mainNetwork = await this.docker.getNetwork(this.network);
+      await this.docker.getNetwork(this.network);
       // We'll connect containers individually after creation
-    } catch (error) {
+    } catch {
       logger.warn('Main zyphron network not found, containers may not be accessible via Traefik');
     }
 
@@ -658,8 +652,7 @@ export class MultiServiceDeployer {
     service: ServiceDefinition,
     baseEnvVars: Record<string, string>,
     serviceContainerMap: Record<string, string>,
-    serviceEnvMap: Record<string, Record<string, string>>,
-    deploymentId: string
+    serviceEnvMap: Record<string, Record<string, string>>
   ): Record<string, string> {
     const env: Record<string, string> = { ...baseEnvVars };
 
