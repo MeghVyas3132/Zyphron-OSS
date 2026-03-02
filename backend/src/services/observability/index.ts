@@ -194,7 +194,7 @@ export class ObservabilityService {
   /**
    * Get predefined metrics for a deployment
    */
-  async getDeploymentMetrics(deploymentId: string): Promise<{
+  async getDeploymentMetrics(_deploymentId: string): Promise<{
     requests: number;
     errors: number;
     latencyP50: number;
