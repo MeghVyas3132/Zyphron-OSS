@@ -3,21 +3,21 @@
 // Real-time build logs and deployment updates
 // ===========================================
 
-import { FastifyInstance } from 'fastify';
-import { WebSocket } from 'ws';
+import { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { getRedisClient, getSubscriberClient } from '../lib/redis.js';
 import { prisma } from '../lib/prisma.js';
 import { createLogger } from '../lib/logger.js';
 
 const logger = createLogger('websocket');
+type WsSocket = import('ws').WebSocket;
 
 // ===========================================
 // TYPES
 // ===========================================
 
 interface WsClient {
-  ws: WebSocket;
+  ws: WsSocket;
   userId: string;
   deploymentId?: string;
   projectId?: string;
@@ -87,6 +87,7 @@ export async function websocketRoutes(app: FastifyInstance) {
   // ===========================================
 
   app.get('/ws/builds/:deploymentId', { websocket: true }, async (connection, req) => {
+    const socket = connection.socket as unknown as WsSocket;
     const { deploymentId } = req.params as { deploymentId: string };
     const clientId = generateClientId();
 
@@ -104,16 +105,17 @@ export async function websocketRoutes(app: FastifyInstance) {
     }
 
     // Register client
+    const userId = await resolveSocketUserId(app, req);
     const client: WsClient = {
-      ws: connection.socket,
-      userId: 'anonymous', // TODO: Extract from JWT
+      ws: socket,
+      userId,
       deploymentId,
       subscriptions: new Set([`${CHANNELS.BUILD_LOGS}${deploymentId}`]),
     };
     clients.set(clientId, client);
 
     // Send connection acknowledgment
-    sendMessage(connection.socket, {
+    sendMessage(socket, {
       type: 'connected',
       payload: {
         clientId,
@@ -125,7 +127,7 @@ export async function websocketRoutes(app: FastifyInstance) {
     // Send existing build logs if available
     const existingLogs = await redis.lrange(`logs:${deploymentId}`, 0, -1);
     if (existingLogs.length > 0) {
-      sendMessage(connection.socket, {
+      sendMessage(socket, {
         type: 'build_logs_history',
         payload: {
           logs: existingLogs.map((l: string) => JSON.parse(l)),
@@ -134,13 +136,13 @@ export async function websocketRoutes(app: FastifyInstance) {
     }
 
     // Handle incoming messages
-    connection.socket.on('message', async (rawMessage: Buffer) => {
+    socket.on('message', async (rawMessage: Buffer) => {
       try {
         const message = JSON.parse(rawMessage.toString());
         await handleMessage(client, message);
       } catch (error) {
         logger.error({ error, clientId }, 'Failed to handle WebSocket message');
-        sendMessage(connection.socket, {
+        sendMessage(socket, {
           type: 'error',
           payload: { message: 'Invalid message format' },
         });
@@ -148,13 +150,13 @@ export async function websocketRoutes(app: FastifyInstance) {
     });
 
     // Handle disconnect
-    connection.socket.on('close', () => {
+    socket.on('close', () => {
       logger.info({ clientId, deploymentId }, 'WebSocket client disconnected');
       clients.delete(clientId);
     });
 
     // Handle errors
-    connection.socket.on('error', (error: Error) => {
+    socket.on('error', (error: Error) => {
       logger.error({ error, clientId }, 'WebSocket error');
       clients.delete(clientId);
     });
@@ -165,6 +167,7 @@ export async function websocketRoutes(app: FastifyInstance) {
   // ===========================================
 
   app.get('/ws/deployments/:deploymentId/logs', { websocket: true }, async (connection, req) => {
+    const socket = connection.socket as unknown as WsSocket;
     const { deploymentId } = req.params as { deploymentId: string };
     const clientId = generateClientId();
 
@@ -182,16 +185,17 @@ export async function websocketRoutes(app: FastifyInstance) {
     }
 
     // Register client
+    const userId = await resolveSocketUserId(app, req);
     const client: WsClient = {
-      ws: connection.socket,
-      userId: 'anonymous', // TODO: Extract from JWT
+      ws: socket,
+      userId,
       deploymentId,
       subscriptions: new Set([`${CHANNELS.BUILD_LOGS}${deploymentId}`]),
     };
     clients.set(clientId, client);
 
     // Send connection acknowledgment
-    sendMessage(connection.socket, {
+    sendMessage(socket, {
       type: 'connected',
       payload: {
         clientId,
@@ -203,7 +207,7 @@ export async function websocketRoutes(app: FastifyInstance) {
     // Send existing build logs if available
     const existingLogs = await redis.lrange(`logs:${deploymentId}`, 0, -1);
     if (existingLogs.length > 0) {
-      sendMessage(connection.socket, {
+      sendMessage(socket, {
         type: 'build_logs_history',
         payload: {
           logs: existingLogs.map((l: string) => JSON.parse(l)),
@@ -212,13 +216,13 @@ export async function websocketRoutes(app: FastifyInstance) {
     }
 
     // Handle incoming messages
-    connection.socket.on('message', async (rawMessage: Buffer) => {
+    socket.on('message', async (rawMessage: Buffer) => {
       try {
         const message = JSON.parse(rawMessage.toString());
         await handleMessage(client, message);
       } catch (error) {
         logger.error({ error, clientId }, 'Failed to handle WebSocket message');
-        sendMessage(connection.socket, {
+        sendMessage(socket, {
           type: 'error',
           payload: { message: 'Invalid message format' },
         });
@@ -226,13 +230,13 @@ export async function websocketRoutes(app: FastifyInstance) {
     });
 
     // Handle disconnect
-    connection.socket.on('close', () => {
+    socket.on('close', () => {
       logger.info({ clientId, deploymentId }, 'WebSocket client disconnected');
       clients.delete(clientId);
     });
 
     // Handle errors
-    connection.socket.on('error', (error: Error) => {
+    socket.on('error', (error: Error) => {
       logger.error({ error, clientId }, 'WebSocket error');
       clients.delete(clientId);
     });
@@ -243,6 +247,7 @@ export async function websocketRoutes(app: FastifyInstance) {
   // ===========================================
 
   app.get('/ws/projects/:projectId', { websocket: true }, async (connection, req) => {
+    const socket = connection.socket as unknown as WsSocket;
     const { projectId } = req.params as { projectId: string };
     const clientId = generateClientId();
 
@@ -259,16 +264,17 @@ export async function websocketRoutes(app: FastifyInstance) {
     }
 
     // Register client
+    const userId = await resolveSocketUserId(app, req);
     const client: WsClient = {
-      ws: connection.socket,
-      userId: 'anonymous',
+      ws: socket,
+      userId,
       projectId,
       subscriptions: new Set([`${CHANNELS.PROJECT_EVENTS}${projectId}`]),
     };
     clients.set(clientId, client);
 
     // Send connection acknowledgment
-    sendMessage(connection.socket, {
+    sendMessage(socket, {
       type: 'connected',
       payload: {
         clientId,
@@ -278,7 +284,7 @@ export async function websocketRoutes(app: FastifyInstance) {
     });
 
     // Handle disconnect
-    connection.socket.on('close', () => {
+    socket.on('close', () => {
       logger.info({ clientId, projectId }, 'WebSocket client disconnected');
       clients.delete(clientId);
     });
@@ -289,35 +295,36 @@ export async function websocketRoutes(app: FastifyInstance) {
   // ===========================================
 
   app.get('/ws', { websocket: true }, async (connection, _req) => {
+    const socket = connection.socket as unknown as WsSocket;
     const clientId = generateClientId();
 
     logger.info({ clientId }, 'WebSocket client connected');
 
     const client: WsClient = {
-      ws: connection.socket,
+      ws: socket,
       userId: 'anonymous',
       subscriptions: new Set(),
     };
     clients.set(clientId, client);
 
-    sendMessage(connection.socket, {
+    sendMessage(socket, {
       type: 'connected',
       payload: { clientId },
     });
 
-    connection.socket.on('message', async (rawMessage: Buffer) => {
+    socket.on('message', async (rawMessage: Buffer) => {
       try {
         const message = JSON.parse(rawMessage.toString());
         await handleMessage(client, message);
       } catch (error) {
-        sendMessage(connection.socket, {
+        sendMessage(socket, {
           type: 'error',
           payload: { message: 'Invalid message format' },
         });
       }
     });
 
-    connection.socket.on('close', () => {
+    socket.on('close', () => {
       clients.delete(clientId);
     });
   });
@@ -331,8 +338,36 @@ function generateClientId(): string {
   return `ws_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 }
 
-function sendMessage(ws: WebSocket, message: WsMessage): void {
-  if (ws.readyState === WebSocket.OPEN) {
+async function resolveSocketUserId(app: FastifyInstance, req: FastifyRequest): Promise<string> {
+  const authHeader = req.headers.authorization;
+  let token: string | null = null;
+
+  if (authHeader?.startsWith('Bearer ')) {
+    token = authHeader.slice('Bearer '.length);
+  }
+
+  if (!token) {
+    const queryToken = new URL(req.url, 'http://localhost').searchParams.get('token');
+    if (queryToken) {
+      token = queryToken;
+    }
+  }
+
+  if (!token) {
+    return 'anonymous';
+  }
+
+  try {
+    const payload = await app.jwt.verify<{ sub?: string; id?: string }>(token);
+    return payload.sub || payload.id || 'anonymous';
+  } catch (error) {
+    logger.debug({ error }, 'WebSocket token verification failed');
+    return 'anonymous';
+  }
+}
+
+function sendMessage(ws: WsSocket, message: WsMessage): void {
+  if (ws.readyState === 1) {
     ws.send(JSON.stringify(message));
   }
 }

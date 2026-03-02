@@ -114,14 +114,17 @@ export const previewRoutes: FastifyPluginAsync = async (fastify) => {
       const { projectId, prNumber } = request.params;
       const { status, deploymentUrl } = request.body;
       try {
-        const preview = await previewService.updatePreviewStatus(
+        await previewService.updatePreviewStatus(
           projectId,
           parseInt(prNumber, 10),
-          status as 'pending' | 'building' | 'ready' | 'failed' | 'expired',
-          deploymentUrl
+          status as 'pending' | 'building' | 'ready' | 'failed' | 'expired'
         );
+        const preview = await previewService.getPreviewByPR(projectId, parseInt(prNumber, 10));
         if (!preview) {
           return reply.status(404).send({ success: false, error: 'Preview environment not found' });
+        }
+        if (deploymentUrl) {
+          preview.url = deploymentUrl;
         }
         return reply.send({ success: true, data: preview, message: 'Preview status updated' });
       } catch (error: unknown) {
