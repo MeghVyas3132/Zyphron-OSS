@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
@@ -81,7 +81,7 @@ export default function ProjectSettingsPage() {
   const [framework, setFramework] = useState(project?.framework || '');
   
   // Update form state when project loads
-  useState(() => {
+  useEffect(() => {
     if (project) {
       setName(project.name);
       setBuildCommand(project.buildCommand || '');
@@ -92,7 +92,7 @@ export default function ProjectSettingsPage() {
       setDefaultBranch(project.defaultBranch || 'main');
       setFramework(project.framework || '');
     }
-  });
+  }, [project]);
 
   const handleSaveGeneral = async () => {
     try {
@@ -150,6 +150,8 @@ export default function ProjectSettingsPage() {
       </div>
     );
   }
+
+  const repositoryUrl = project.repoUrl || project.repositoryUrl;
 
   return (
     <div className="min-h-screen bg-background">
@@ -378,13 +380,13 @@ export default function ProjectSettingsPage() {
                   <div className="space-y-3 text-sm">
                     <div className="flex items-center justify-between">
                       <span className="text-muted-foreground">Repository</span>
-                      <a 
-                        href={project.repoUrl} 
+                      <a
+                        href={repositoryUrl}
                         target="_blank" 
                         rel="noopener noreferrer"
                         className="font-mono hover:text-primary"
                       >
-                        {project.repoUrl?.replace('https://github.com/', '')}
+                        {(repositoryUrl || '').replace('https://github.com/', '')}
                       </a>
                     </div>
                     <div className="flex items-center justify-between">
@@ -420,7 +422,7 @@ export default function ProjectSettingsPage() {
                     Configure custom domains for your project. SSL certificates are automatically provisioned.
                   </p>
                 </div>
-                <Domains projectId={project.id} subdomain={project.subdomain} />
+                <Domains projectId={project.id} subdomain={project.subdomain || ''} />
               </div>
             )}
 
