@@ -6,11 +6,11 @@ import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
+import { Github, Loader2, Lock, Mail } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Github, Loader2, Mail, Lock } from 'lucide-react';
-import { toast } from 'sonner';
 
 const loginSchema = z.object({
   email: z.string().email('Please enter a valid email'),
@@ -35,7 +35,6 @@ export default function LoginPage() {
   const onSubmit = async (data: LoginForm) => {
     setIsLoading(true);
     try {
-      // TODO: Implement actual login
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -48,11 +47,8 @@ export default function LoginPage() {
       }
 
       const result = await response.json();
-      
-      // Store token
       localStorage.setItem('auth-token', result.data.token);
-      
-      toast.success('Welcome back!');
+      toast.success('Welcome back');
       router.push('/dashboard');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Login failed');
@@ -63,41 +59,33 @@ export default function LoginPage() {
 
   const handleGithubLogin = () => {
     setIsGithubLoading(true);
-    // Redirect to GitHub OAuth
     window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/github`;
   };
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-2 text-center">
-        <h1 className="text-3xl font-bold">Welcome back</h1>
-        <p className="text-muted-foreground">
-          Sign in to your account to continue
-        </p>
+    <div className="space-y-7">
+      <div className="text-center space-y-2 stagger-in">
+        <p className="uppercase tracking-[0.2em] text-xs text-muted-foreground">Secure Access</p>
+        <h1 className="text-3xl font-semibold mono-text-gradient">Welcome Back</h1>
+        <p className="text-muted-foreground">Sign in to operate your deployment control plane.</p>
       </div>
 
       <Button
         variant="outline"
-        className="w-full"
+        className="w-full h-11 rounded-xl"
         onClick={handleGithubLogin}
         disabled={isGithubLoading}
       >
-        {isGithubLoading ? (
-          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-        ) : (
-          <Github className="mr-2 h-4 w-4" />
-        )}
+        {isGithubLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Github className="mr-2 h-4 w-4" />}
         Continue with GitHub
       </Button>
 
       <div className="relative">
         <div className="absolute inset-0 flex items-center">
-          <span className="w-full border-t" />
+          <span className="w-full border-t border-border/70" />
         </div>
-        <div className="relative flex justify-center text-xs uppercase">
-          <span className="bg-background px-2 text-muted-foreground">
-            Or continue with
-          </span>
+        <div className="relative flex justify-center text-[11px] uppercase tracking-[0.18em]">
+          <span className="bg-card px-3 text-muted-foreground">or use email</span>
         </div>
       </div>
 
@@ -106,54 +94,35 @@ export default function LoginPage() {
           <Label htmlFor="email">Email</Label>
           <div className="relative">
             <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-            <Input
-              id="email"
-              type="email"
-              placeholder="name@example.com"
-              className="pl-10"
-              {...register('email')}
-            />
+            <Input id="email" type="email" placeholder="name@example.com" className="pl-10 h-11 rounded-xl" {...register('email')} />
           </div>
-          {errors.email && (
-            <p className="text-sm text-destructive">{errors.email.message}</p>
-          )}
+          {errors.email && <p className="text-sm text-destructive">{errors.email.message}</p>}
         </div>
 
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <Label htmlFor="password">Password</Label>
-            <Link
-              href="/forgot-password"
-              className="text-sm text-primary hover:underline"
-            >
-              Forgot password?
+            <Link href="/forgot-password" className="text-xs uppercase tracking-wide text-muted-foreground hover:text-foreground transition-colors">
+              Forgot?
             </Link>
           </div>
           <div className="relative">
             <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-            <Input
-              id="password"
-              type="password"
-              placeholder="Enter your password"
-              className="pl-10"
-              {...register('password')}
-            />
+            <Input id="password" type="password" placeholder="Enter your password" className="pl-10 h-11 rounded-xl" {...register('password')} />
           </div>
-          {errors.password && (
-            <p className="text-sm text-destructive">{errors.password.message}</p>
-          )}
+          {errors.password && <p className="text-sm text-destructive">{errors.password.message}</p>}
         </div>
 
-        <Button type="submit" className="w-full" disabled={isLoading}>
+        <Button type="submit" className="w-full h-11 rounded-xl" disabled={isLoading}>
           {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           Sign In
         </Button>
       </form>
 
       <p className="text-center text-sm text-muted-foreground">
-        Don't have an account?{' '}
-        <Link href="/register" className="text-primary hover:underline">
-          Sign up
+        No account?{' '}
+        <Link href="/register" className="text-foreground font-medium hover:opacity-70 transition-opacity">
+          Create one
         </Link>
       </p>
     </div>
