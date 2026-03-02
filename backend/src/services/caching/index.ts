@@ -167,7 +167,6 @@ export class CacheKeyGenerator {
 export class SmartCachingService {
   private redis = getRedisClient();
   private readonly CACHE_TTL = 7 * 24 * 60 * 60; // 7 days
-  private readonly MAX_CACHE_SIZE = 5 * 1024 * 1024 * 1024; // 5GB per project
 
   /**
    * Check if cache exists and is valid
@@ -304,7 +303,7 @@ export class SmartCachingService {
   /**
    * Get recommended cache strategy for a project
    */
-  getCacheStrategy(framework: string, packageManager: string): {
+  getCacheStrategy(framework: string, _packageManager: string): {
     layers: string[];
     priorities: Record<string, number>;
     ttl: Record<string, number>;
