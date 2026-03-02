@@ -5,42 +5,34 @@ import {
   Cloud, 
   Plus, 
   RefreshCw, 
-  AlertCircle,
   Server,
   ArrowRightLeft,
   DollarSign,
   Settings,
-  Play,
-  Pause,
   Scale,
   Globe
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { 
-  useCloudProviders, 
   useCloudDeployments, 
-  useDeployToCloud,
   useScaleDeployment,
   useCloudCostEstimate
 } from '@/hooks/use-cloud';
 
 const providerLogos: Record<string, { name: string; color: string }> = {
-  aws: { name: 'AWS', color: 'bg-orange-500' },
-  gcp: { name: 'Google Cloud', color: 'bg-blue-500' },
-  azure: { name: 'Azure', color: 'bg-sky-600' },
-  oracle: { name: 'Oracle Cloud', color: 'bg-red-600' },
+  aws: { name: 'AWS', color: 'bg-foreground/80' },
+  gcp: { name: 'Google Cloud', color: 'bg-foreground/70' },
+  azure: { name: 'Azure', color: 'bg-foreground/60' },
+  oracle: { name: 'Oracle Cloud', color: 'bg-foreground/90' },
 };
 
 export default function CloudPage() {
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
-  const { data: providers, isLoading: loadingProviders } = useCloudProviders();
   const { data: deployments, isLoading: loadingDeployments, refetch } = useCloudDeployments();
-  const deployMutation = useDeployToCloud();
   const scaleMutation = useScaleDeployment();
   const { data: costEstimate } = useCloudCostEstimate(selectedProvider || '');
 
-  const isLoading = loadingProviders || loadingDeployments;
+  const isLoading = loadingDeployments;
 
   if (isLoading) {
     return (
@@ -53,9 +45,9 @@ export default function CloudPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between stagger-in">
         <div>
-          <h1 className="text-3xl font-bold flex items-center gap-3">
+          <h1 className="text-3xl font-semibold flex items-center gap-3 mono-text-gradient">
             <Cloud className="h-8 w-8" />
             Multi-Cloud Deployment
           </h1>
@@ -80,8 +72,8 @@ export default function CloudPage() {
           <div
             key={key}
             onClick={() => setSelectedProvider(key)}
-            className={`p-6 border rounded-lg cursor-pointer transition-all hover:shadow-lg ${
-              selectedProvider === key ? 'ring-2 ring-primary' : ''
+            className={`p-6 premium-panel premium-card-hover cursor-pointer transition-all ${
+              selectedProvider === key ? 'ring-2 ring-foreground/40' : ''
             }`}
           >
             <div className="flex items-center gap-3 mb-4">
@@ -97,8 +89,8 @@ export default function CloudPage() {
             </div>
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">Status</span>
-              <span className="flex items-center gap-1 text-green-500">
-                <div className="h-2 w-2 rounded-full bg-green-500" />
+              <span className="flex items-center gap-1">
+                <div className="h-2 w-2 rounded-full bg-foreground" />
                 Connected
               </span>
             </div>
@@ -108,7 +100,7 @@ export default function CloudPage() {
 
       {/* Cost Estimation */}
       {selectedProvider && costEstimate && (
-        <div className="p-6 border rounded-lg bg-muted/50">
+        <div className="p-6 premium-panel stagger-in animate-delay-1">
           <h3 className="font-semibold flex items-center gap-2 mb-4">
             <DollarSign className="h-5 w-5" />
             Cost Estimate for {providerLogos[selectedProvider]?.name}
@@ -138,7 +130,7 @@ export default function CloudPage() {
             {deployments.map((deployment) => (
               <div
                 key={deployment.id}
-                className="p-4 border rounded-lg flex items-center justify-between"
+                className="p-4 premium-panel flex items-center justify-between"
               >
                 <div className="flex items-center gap-4">
                   <div className={`h-10 w-10 rounded-lg ${providerLogos[deployment.provider]?.color || 'bg-gray-500'} flex items-center justify-center`}>
@@ -158,15 +150,11 @@ export default function CloudPage() {
                   </div>
                   <div className="text-right">
                     <p className="text-sm text-muted-foreground">Status</p>
-                    <span className={`inline-flex items-center gap-1 text-sm ${
-                      deployment.status === 'running' ? 'text-green-500' :
-                      deployment.status === 'deploying' ? 'text-yellow-500' :
-                      'text-red-500'
-                    }`}>
+                    <span className="inline-flex items-center gap-1 text-sm">
                       <div className={`h-2 w-2 rounded-full ${
-                        deployment.status === 'running' ? 'bg-green-500' :
-                        deployment.status === 'deploying' ? 'bg-yellow-500' :
-                        'bg-red-500'
+                        deployment.status === 'running' ? 'bg-foreground' :
+                        deployment.status === 'deploying' ? 'bg-foreground/70' :
+                        'bg-foreground/50'
                       }`} />
                       {deployment.status}
                     </span>
@@ -196,7 +184,7 @@ export default function CloudPage() {
             ))}
           </div>
         ) : (
-          <div className="text-center py-12 border rounded-lg">
+          <div className="text-center py-12 premium-panel">
             <Cloud className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
             <h3 className="font-semibold mb-2">No Cloud Deployments</h3>
             <p className="text-muted-foreground mb-4">
@@ -218,7 +206,7 @@ export default function CloudPage() {
         </h2>
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
           {['us-east-1', 'us-west-2', 'eu-west-1', 'eu-central-1', 'ap-southeast-1', 'ap-northeast-1'].map((region) => (
-            <div key={region} className="p-3 border rounded-lg text-center">
+            <div key={region} className="p-3 premium-panel text-center">
               <p className="font-mono text-sm">{region}</p>
               <p className="text-xs text-muted-foreground">Available</p>
             </div>
