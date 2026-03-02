@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Key, Trash2, Copy, Check, Plus, Eye, EyeOff, AlertTriangle, Clock, RefreshCw } from 'lucide-react';
+import { Key, Trash2, Copy, Check, Plus, AlertTriangle, Clock, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -70,14 +70,14 @@ export function ApiKeysSection() {
     const now = new Date();
     const daysUntil = Math.ceil((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 
-    if (daysUntil < 0) return { text: 'Expired', color: 'text-red-500' };
-    if (daysUntil < 7) return { text: `Expires in ${daysUntil} days`, color: 'text-yellow-500' };
-    if (daysUntil < 30) return { text: `Expires in ${daysUntil} days`, color: 'text-orange-500' };
+    if (daysUntil < 0) return { text: 'Expired', color: 'text-foreground' };
+    if (daysUntil < 7) return { text: `Expires in ${daysUntil} days`, color: 'text-foreground/90' };
+    if (daysUntil < 30) return { text: `Expires in ${daysUntil} days`, color: 'text-foreground/75' };
     return { text: `Expires ${formatDate(expiresAt)}`, color: 'text-muted-foreground' };
   };
 
   return (
-    <div className="rounded-lg border bg-card p-6">
+    <div className="premium-panel p-6">
       <div className="flex items-center justify-between mb-4">
         <div>
           <h3 className="font-semibold">API Keys</h3>
@@ -103,7 +103,7 @@ export function ApiKeysSection() {
 
       {/* Create New Key Dialog */}
       {isCreating && (
-        <div className="mb-4 p-4 rounded-lg border bg-muted/50 space-y-4">
+        <div className="mb-4 p-4 premium-panel space-y-4">
           <h4 className="font-medium">Create New API Key</h4>
           
           <div className="space-y-2">
@@ -122,7 +122,7 @@ export function ApiKeysSection() {
               id="key-expiry"
               value={newKeyExpiry}
               onChange={(e) => setNewKeyExpiry(e.target.value)}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            className="w-full rounded-xl border border-input bg-background/80 px-3 py-2 text-sm"
             >
               <option value="30">30 days</option>
               <option value="60">60 days</option>
@@ -149,18 +149,18 @@ export function ApiKeysSection() {
 
       {/* Show Created Key */}
       {createdKey && (
-        <div className="mb-4 p-4 rounded-lg border border-green-500/50 bg-green-500/10 space-y-3">
+        <div className="mb-4 p-4 premium-panel space-y-3">
           <div className="flex items-start gap-2">
             <AlertTriangle className="h-5 w-5 text-yellow-500 flex-shrink-0 mt-0.5" />
             <div>
-              <h4 className="font-medium text-green-600">API Key Created</h4>
+              <h4 className="font-medium">API Key Created</h4>
               <p className="text-sm text-muted-foreground">
                 Make sure to copy your API key now. You won&apos;t be able to see it again!
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 p-3 rounded-md bg-background border font-mono text-sm">
+          <div className="flex items-center gap-2 p-3 rounded-md bg-background border border-border/70 font-mono text-sm">
             <code className="flex-1 break-all">{createdKey.key}</code>
             <Button
               variant="ghost"
@@ -211,19 +211,19 @@ export function ApiKeysSection() {
             return (
               <div
                 key={key.id}
-                className={`flex items-center justify-between p-4 rounded-lg border ${
-                  expired ? 'border-red-500/30 bg-red-500/5' : ''
+              className={`flex items-center justify-between p-4 rounded-lg border ${
+                  expired ? 'border-foreground/35 bg-foreground/5' : 'border-border/60'
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <Key className={`h-5 w-5 ${expired ? 'text-red-500' : 'text-muted-foreground'}`} />
+                  <Key className={`h-5 w-5 ${expired ? 'text-foreground' : 'text-muted-foreground'}`} />
                   <div>
                     <div className="flex items-center gap-2">
                       <p className="font-medium">{key.name}</p>
                       {expired && (
-                        <span className="px-2 py-0.5 text-xs rounded bg-red-500/20 text-red-500">
-                          Expired
-                        </span>
+                          <span className="px-2 py-0.5 text-xs rounded bg-foreground/15 text-foreground">
+                            Expired
+                          </span>
                       )}
                     </div>
                     <div className="flex items-center gap-3 text-sm text-muted-foreground">
@@ -247,7 +247,7 @@ export function ApiKeysSection() {
                   size="sm"
                   onClick={() => handleDelete(key.id)}
                   disabled={deleteApiKey.isPending}
-                  className="text-red-500 hover:text-red-600 hover:bg-red-500/10"
+                  className="text-foreground/70 hover:text-foreground hover:bg-foreground/10"
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
@@ -258,7 +258,7 @@ export function ApiKeysSection() {
       )}
 
       {/* Usage Info */}
-      <div className="mt-6 p-4 rounded-lg bg-muted/50">
+      <div className="mt-6 p-4 rounded-lg bg-muted/40 border border-border/60">
         <h4 className="text-sm font-medium mb-2">Using API Keys</h4>
         <p className="text-xs text-muted-foreground mb-2">
           Include your API key in the Authorization header:
