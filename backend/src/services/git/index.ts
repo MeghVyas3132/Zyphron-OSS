@@ -3,7 +3,7 @@
 // Handles repository cloning, branch management, and commit information
 // ===========================================
 
-import simpleGit, { CloneOptions } from 'simple-git';
+import { simpleGit, type CloneOptions } from 'simple-git';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { URL } from 'node:url';
