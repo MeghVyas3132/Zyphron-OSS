@@ -40,7 +40,6 @@ DEPLOYMENT_ID=""
 
 # Test database details
 TEST_DB_NAME="test-db-$(date +%s)"
-TEST_DB_SLUG=""
 DATABASE_ID=""
 
 # ===========================================
@@ -66,17 +65,17 @@ print_test() {
 
 print_success() {
     echo -e "${GREEN}  ✓ $1${NC}"
-    ((TESTS_PASSED++))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 }
 
 print_fail() {
     echo -e "${RED}  ✗ $1${NC}"
-    ((TESTS_FAILED++))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
 }
 
 print_skip() {
     echo -e "${YELLOW}  ⊘ $1 (skipped)${NC}"
-    ((TESTS_SKIPPED++))
+    TESTS_SKIPPED=$((TESTS_SKIPPED + 1))
 }
 
 print_info() {
@@ -106,7 +105,13 @@ api_request() {
 # Check if response has success: true
 check_success() {
     local response="$1"
-    echo "$response" | jq -e '.success == true' > /dev/null 2>&1
+    echo "$response" | jq -e '
+      if has("success") then
+        .success == true
+      else
+        (has("error") | not) and (has("statusCode") | not)
+      end
+    ' > /dev/null 2>&1
 }
 
 # Extract value from JSON response
@@ -174,7 +179,7 @@ test_service_health() {
     print_test "API Health Endpoint"
     local response=$(api_request "GET" "/health")
     
-    if echo "$response" | jq -e '.status == "ok"' > /dev/null 2>&1; then
+    if echo "$response" | jq -e '.status == "ok" or .status == "healthy"' > /dev/null 2>&1; then
         print_success "API is healthy"
         local version=$(get_json_value "$response" '.version // "unknown"')
         print_info "API Version: $version"
@@ -188,20 +193,20 @@ test_service_health() {
     print_test "API Readiness"
     response=$(api_request "GET" "/health/ready")
     
-    if echo "$response" | jq -e '.ready == true' > /dev/null 2>&1; then
+    if echo "$response" | jq -e '(.ready == true) or (.status == "healthy")' > /dev/null 2>&1; then
         print_success "API is ready"
         
         # Check individual services
-        local db_status=$(get_json_value "$response" '.services.database // "unknown"')
-        local redis_status=$(get_json_value "$response" '.services.redis // "unknown"')
+        local db_status=$(get_json_value "$response" '.services.database // .checks.database // "unknown"')
+        local redis_status=$(get_json_value "$response" '.services.redis // .checks.redis // "unknown"')
         
-        if [ "$db_status" = "connected" ]; then
+        if [ "$db_status" = "connected" ] || [ "$db_status" = "true" ]; then
             print_success "Database is connected"
         else
             print_fail "Database connection: $db_status"
         fi
         
-        if [ "$redis_status" = "connected" ]; then
+        if [ "$redis_status" = "connected" ] || [ "$redis_status" = "true" ]; then
             print_success "Redis is connected"
         else
             print_skip "Redis connection: $redis_status"
@@ -322,9 +327,8 @@ test_projects() {
     local project_data=$(cat <<EOF
 {
     "name": "$TEST_PROJECT_NAME",
-    "slug": "$TEST_PROJECT_SLUG",
-    "gitUrl": "$TEST_GIT_URL",
-    "defaultBranch": "main"
+    "repositoryUrl": "$TEST_GIT_URL",
+    "branch": "main"
 }
 EOF
 )
@@ -332,7 +336,8 @@ EOF
     local response=$(api_request "POST" "/api/v1/projects" "$project_data" "$AUTH_TOKEN")
     
     if check_success "$response"; then
-        PROJECT_ID=$(get_json_value "$response" '.data.id')
+        PROJECT_ID=$(get_json_value "$response" '.data.project.id // empty')
+        TEST_PROJECT_SLUG=$(get_json_value "$response" '.data.project.slug // empty')
         print_success "Project created successfully"
         print_info "Project ID: $PROJECT_ID"
         print_info "Project Slug: $TEST_PROJECT_SLUG"
@@ -349,7 +354,7 @@ EOF
     response=$(api_request "GET" "/api/v1/projects" "" "$AUTH_TOKEN")
     
     if check_success "$response"; then
-        local count=$(get_json_value "$response" '.data | length')
+        local count=$(get_json_value "$response" '.data.projects | length // 0')
         print_success "Listed $count project(s)"
     else
         print_fail "Failed to list projects"
@@ -359,10 +364,10 @@ EOF
     
     # Get single project
     print_test "Get project by slug"
-    response=$(api_request "GET" "/api/v1/projects/$TEST_PROJECT_SLUG" "" "$AUTH_TOKEN")
-    
+    response=$(api_request "GET" "/api/v1/projects/$PROJECT_ID" "" "$AUTH_TOKEN")
+
     if check_success "$response"; then
-        local project_name=$(get_json_value "$response" '.data.name')
+        local project_name=$(get_json_value "$response" '.data.project.name // .data.name')
         print_success "Retrieved project: $project_name"
     else
         print_fail "Failed to get project"
@@ -373,7 +378,7 @@ EOF
     # Update project
     print_test "Update project settings"
     local update_data='{"buildCommand": "npm run build", "outputDirectory": "dist"}'
-    response=$(api_request "PUT" "/api/v1/projects/$TEST_PROJECT_SLUG" "$update_data" "$AUTH_TOKEN")
+    response=$(api_request "PUT" "/api/v1/projects/$PROJECT_ID" "$update_data" "$AUTH_TOKEN")
     
     if check_success "$response"; then
         print_success "Project updated successfully"
@@ -389,7 +394,7 @@ EOF
 test_env_variables() {
     print_header "ENVIRONMENT VARIABLES TESTS"
     
-    if [ -z "$AUTH_TOKEN" ] || [ -z "$TEST_PROJECT_SLUG" ]; then
+    if [ -z "$AUTH_TOKEN" ] || [ -z "$PROJECT_ID" ]; then
         print_skip "Skipping env tests - no project"
         return
     fi
@@ -409,7 +414,7 @@ test_env_variables() {
 EOF
 )
     
-    local response=$(api_request "POST" "/api/v1/projects/$TEST_PROJECT_SLUG/env" "$env_data" "$AUTH_TOKEN")
+    local response=$(api_request "POST" "/api/v1/projects/$PROJECT_ID/env/bulk" "$env_data" "$AUTH_TOKEN")
     
     if check_success "$response"; then
         print_success "Environment variables set successfully"
@@ -421,10 +426,10 @@ EOF
     
     # Get env variables
     print_test "Get environment variables"
-    response=$(api_request "GET" "/api/v1/projects/$TEST_PROJECT_SLUG/env" "" "$AUTH_TOKEN")
+    response=$(api_request "GET" "/api/v1/projects/$PROJECT_ID/env" "" "$AUTH_TOKEN")
     
     if check_success "$response"; then
-        local count=$(get_json_value "$response" '.data | length')
+        local count=$(get_json_value "$response" '.data.envVariables | length // 0')
         print_success "Retrieved $count environment variable(s)"
     else
         print_skip "Get env variables not implemented"
@@ -438,7 +443,7 @@ EOF
 test_deployments() {
     print_header "DEPLOYMENTS TESTS"
     
-    if [ -z "$AUTH_TOKEN" ] || [ -z "$TEST_PROJECT_SLUG" ]; then
+    if [ -z "$AUTH_TOKEN" ] || [ -z "$PROJECT_ID" ]; then
         print_skip "Skipping deployment tests - no project"
         return
     fi
@@ -449,11 +454,11 @@ test_deployments() {
     print_test "Trigger new deployment"
     local deploy_data='{"branch": "main"}'
     
-    local response=$(api_request "POST" "/api/v1/projects/$TEST_PROJECT_SLUG/deployments" "$deploy_data" "$AUTH_TOKEN")
+    local response=$(api_request "POST" "/api/v1/projects/$PROJECT_ID/deployments" "$deploy_data" "$AUTH_TOKEN")
     
     if check_success "$response"; then
-        DEPLOYMENT_ID=$(get_json_value "$response" '.data.id')
-        local status=$(get_json_value "$response" '.data.status')
+        DEPLOYMENT_ID=$(get_json_value "$response" '.deployment.id // .data.deployment.id // empty')
+        local status=$(get_json_value "$response" '.deployment.status // .data.deployment.status // "unknown"')
         print_success "Deployment triggered successfully"
         print_info "Deployment ID: $DEPLOYMENT_ID"
         print_info "Initial Status: $status"
@@ -467,10 +472,10 @@ test_deployments() {
     
     # List deployments
     print_test "List project deployments"
-    response=$(api_request "GET" "/api/v1/projects/$TEST_PROJECT_SLUG/deployments" "" "$AUTH_TOKEN")
+    response=$(api_request "GET" "/api/v1/projects/$PROJECT_ID/deployments" "" "$AUTH_TOKEN")
     
     if check_success "$response"; then
-        local count=$(get_json_value "$response" '.data | length')
+        local count=$(get_json_value "$response" '.deployments | length // 0')
         print_success "Listed $count deployment(s)"
     else
         print_fail "Failed to list deployments"
@@ -481,10 +486,10 @@ test_deployments() {
     if [ -n "$DEPLOYMENT_ID" ]; then
         # Get deployment details
         print_test "Get deployment details"
-        response=$(api_request "GET" "/api/v1/projects/$TEST_PROJECT_SLUG/deployments/$DEPLOYMENT_ID" "" "$AUTH_TOKEN")
+        response=$(api_request "GET" "/api/v1/projects/$PROJECT_ID/deployments/$DEPLOYMENT_ID" "" "$AUTH_TOKEN")
         
         if check_success "$response"; then
-            local status=$(get_json_value "$response" '.data.status')
+            local status=$(get_json_value "$response" '.deployment.status // .data.deployment.status // "unknown"')
             print_success "Deployment status: $status"
         else
             print_fail "Failed to get deployment details"
@@ -512,7 +517,8 @@ test_databases() {
 {
     "name": "$TEST_DB_NAME",
     "type": "POSTGRESQL",
-    "version": "15"
+    "version": "15",
+    "projectId": "$PROJECT_ID"
 }
 EOF
 )
@@ -520,8 +526,7 @@ EOF
     local response=$(api_request "POST" "/api/v1/databases" "$db_data" "$AUTH_TOKEN")
     
     if check_success "$response"; then
-        DATABASE_ID=$(get_json_value "$response" '.data.id')
-        TEST_DB_SLUG=$(get_json_value "$response" '.data.slug')
+        DATABASE_ID=$(get_json_value "$response" '.data.database.id // empty')
         print_success "Database created successfully"
         print_info "Database ID: $DATABASE_ID"
     else
@@ -537,7 +542,7 @@ EOF
     response=$(api_request "GET" "/api/v1/databases" "" "$AUTH_TOKEN")
     
     if check_success "$response"; then
-        local count=$(get_json_value "$response" '.data | length')
+        local count=$(get_json_value "$response" '.data.databases | length // 0')
         print_success "Listed $count database(s)"
     else
         print_fail "Failed to list databases"
@@ -545,10 +550,10 @@ EOF
     
     print_section "Get Database Connection"
     
-    if [ -n "$TEST_DB_SLUG" ]; then
+    if [ -n "$DATABASE_ID" ]; then
         # Get connection string
         print_test "Get database connection string"
-        response=$(api_request "GET" "/api/v1/databases/$TEST_DB_SLUG/connection" "" "$AUTH_TOKEN")
+        response=$(api_request "GET" "/api/v1/databases/$DATABASE_ID/connection" "" "$AUTH_TOKEN")
         
         if check_success "$response"; then
             print_success "Connection string retrieved"
@@ -565,7 +570,7 @@ EOF
 test_domains() {
     print_header "DOMAINS TESTS"
     
-    if [ -z "$AUTH_TOKEN" ] || [ -z "$TEST_PROJECT_SLUG" ]; then
+    if [ -z "$AUTH_TOKEN" ] || [ -z "$PROJECT_ID" ]; then
         print_skip "Skipping domain tests - no project"
         return
     fi
@@ -576,7 +581,7 @@ test_domains() {
     print_test "Add custom domain"
     local domain_data='{"domain": "test.example.com"}'
     
-    local response=$(api_request "POST" "/api/v1/projects/$TEST_PROJECT_SLUG/domains" "$domain_data" "$AUTH_TOKEN")
+    local response=$(api_request "POST" "/api/v1/projects/$PROJECT_ID/domains" "$domain_data" "$AUTH_TOKEN")
     
     if check_success "$response"; then
         print_success "Domain added successfully"
@@ -588,10 +593,10 @@ test_domains() {
     
     # List domains
     print_test "List project domains"
-    response=$(api_request "GET" "/api/v1/projects/$TEST_PROJECT_SLUG/domains" "" "$AUTH_TOKEN")
+    response=$(api_request "GET" "/api/v1/projects/$PROJECT_ID/domains" "" "$AUTH_TOKEN")
     
     if check_success "$response"; then
-        local count=$(get_json_value "$response" '.data | length')
+        local count=$(get_json_value "$response" '.data.domains | length // 0')
         print_success "Listed $count domain(s)"
     else
         print_skip "List domains not implemented"
@@ -605,7 +610,7 @@ test_domains() {
 test_webhooks() {
     print_header "WEBHOOKS TESTS"
     
-    if [ -z "$AUTH_TOKEN" ] || [ -z "$TEST_PROJECT_SLUG" ]; then
+    if [ -z "$AUTH_TOKEN" ] || [ -z "$PROJECT_ID" ]; then
         print_skip "Skipping webhook tests - no project"
         return
     fi
@@ -616,13 +621,13 @@ test_webhooks() {
     print_test "Create deployment webhook"
     local webhook_data=$(cat <<EOF
 {
-    "url": "https://webhook.site/test",
-    "events": ["deployment.created", "deployment.succeeded", "deployment.failed"]
+    "provider": "GITHUB",
+    "events": ["push", "pull_request"]
 }
 EOF
 )
     
-    local response=$(api_request "POST" "/api/v1/projects/$TEST_PROJECT_SLUG/webhooks" "$webhook_data" "$AUTH_TOKEN")
+    local response=$(api_request "POST" "/api/v1/projects/$PROJECT_ID/webhooks" "$webhook_data" "$AUTH_TOKEN")
     
     if check_success "$response"; then
         print_success "Webhook created successfully"
@@ -634,10 +639,10 @@ EOF
     
     # List webhooks
     print_test "List project webhooks"
-    response=$(api_request "GET" "/api/v1/projects/$TEST_PROJECT_SLUG/webhooks" "" "$AUTH_TOKEN")
+    response=$(api_request "GET" "/api/v1/projects/$PROJECT_ID/webhooks" "" "$AUTH_TOKEN")
     
     if check_success "$response"; then
-        local count=$(get_json_value "$response" '.data | length')
+        local count=$(get_json_value "$response" '.webhooks | length // 0')
         print_success "Listed $count webhook(s)"
     else
         print_skip "List webhooks not implemented"
@@ -683,7 +688,7 @@ EOF
     response=$(api_request "GET" "/api/v1/teams" "" "$AUTH_TOKEN")
     
     if check_success "$response"; then
-        local count=$(get_json_value "$response" '.data | length')
+        local count=$(get_json_value "$response" '.data.teams | length // 0')
         print_success "Listed $count team(s)"
     else
         print_skip "List teams not implemented"
@@ -709,7 +714,7 @@ test_api_keys() {
     local key_data=$(cat <<EOF
 {
     "name": "Test API Key",
-    "scopes": ["read:projects", "write:deployments"]
+    "expiresInDays": 30
 }
 EOF
 )
@@ -729,7 +734,7 @@ EOF
     response=$(api_request "GET" "/api/v1/api-keys" "" "$AUTH_TOKEN")
     
     if check_success "$response"; then
-        local count=$(get_json_value "$response" '.data | length')
+        local count=$(get_json_value "$response" '.data.apiKeys | length // 0')
         print_success "Listed $count API key(s)"
     else
         print_skip "List API keys not implemented"
@@ -766,10 +771,10 @@ test_metrics() {
     
     print_section "Project Metrics"
     
-    if [ -n "$TEST_PROJECT_SLUG" ]; then
+    if [ -n "$PROJECT_ID" ]; then
         # Get project metrics
         print_test "Get project metrics"
-        response=$(api_request "GET" "/api/v1/projects/$TEST_PROJECT_SLUG/metrics" "" "$AUTH_TOKEN")
+        response=$(api_request "GET" "/api/v1/projects/$PROJECT_ID/metrics" "" "$AUTH_TOKEN")
         
         if check_success "$response"; then
             print_success "Project metrics retrieved"
@@ -798,7 +803,7 @@ test_audit_logs() {
     local response=$(api_request "GET" "/api/v1/audit" "" "$AUTH_TOKEN")
     
     if check_success "$response"; then
-        local count=$(get_json_value "$response" '.data | length')
+        local count=$(get_json_value "$response" '.data.logs | length // 0')
         print_success "Retrieved $count audit log(s)"
     else
         print_skip "Audit logs not implemented"
@@ -821,7 +826,7 @@ test_ai_analysis() {
     
     # Analyze repository
     print_test "Analyze repository for framework detection"
-    local analyze_data='{"repoUrl": "https://github.com/vercel/next.js"}'
+    local analyze_data='{"files":["package.json","src/index.ts"],"dependencies":{"fastify":"^4.0.0"},"devDependencies":{"typescript":"^5.0.0"},"hasDockerfile":false,"hasTests":true}'
     
     local response=$(api_request "POST" "/api/v1/ai/analyze" "$analyze_data" "$AUTH_TOKEN")
     
@@ -837,7 +842,7 @@ test_ai_analysis() {
     
     # Generate Dockerfile
     print_test "Generate Dockerfile"
-    local dockerfile_data='{"repoUrl": "https://github.com/vercel/next.js"}'
+    local dockerfile_data='{"framework":"nextjs","language":"typescript","packageManager":"npm"}'
     
     response=$(api_request "POST" "/api/v1/ai/dockerfile" "$dockerfile_data" "$AUTH_TOKEN")
     
@@ -863,9 +868,9 @@ cleanup_test_data() {
     print_section "Cleaning Up Test Data"
     
     # Delete test database
-    if [ -n "$TEST_DB_SLUG" ]; then
+    if [ -n "$DATABASE_ID" ]; then
         print_test "Delete test database"
-        local response=$(api_request "DELETE" "/api/v1/databases/$TEST_DB_SLUG" "" "$AUTH_TOKEN")
+        local response=$(api_request "DELETE" "/api/v1/databases/$DATABASE_ID" "" "$AUTH_TOKEN")
         if check_success "$response"; then
             print_success "Test database deleted"
         else
@@ -874,9 +879,9 @@ cleanup_test_data() {
     fi
     
     # Delete test project
-    if [ -n "$TEST_PROJECT_SLUG" ]; then
+    if [ -n "$PROJECT_ID" ]; then
         print_test "Delete test project"
-        local response=$(api_request "DELETE" "/api/v1/projects/$TEST_PROJECT_SLUG" "" "$AUTH_TOKEN")
+        local response=$(api_request "DELETE" "/api/v1/projects/$PROJECT_ID" "" "$AUTH_TOKEN")
         if check_success "$response"; then
             print_success "Test project deleted"
         else

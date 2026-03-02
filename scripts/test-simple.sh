@@ -24,11 +24,12 @@ TESTS_PASSED=0
 TESTS_FAILED=0
 TESTS_SKIPPED=0
 
-# Use dev token for testing
-AUTH_TOKEN="dev-token"
-
 # Test data
 TIMESTAMP=$(date +%s)
+TEST_EMAIL="simple-$TIMESTAMP@zyphron.dev"
+TEST_PASSWORD="TestPassword123!"
+TEST_NAME="Simple Test User"
+AUTH_TOKEN=""
 TEST_PROJECT_SLUG="test-project-$TIMESTAMP"
 TEST_PROJECT_NAME="Test Project $TIMESTAMP"
 TEST_DB_NAME="test-db-$TIMESTAMP"
@@ -139,51 +140,45 @@ test_service_health() {
 test_authentication() {
     print_header "AUTHENTICATION TESTS"
     
-    print_section "Dev Token Authentication"
-    
-    # Test with dev token
-    print_test "Authenticate with dev-token"
-    local response=$(curl -s --max-time 10 \
+    print_section "Register + Login"
+
+    print_test "Register test user"
+    local register_payload="{\"name\":\"$TEST_NAME\",\"email\":\"$TEST_EMAIL\",\"password\":\"$TEST_PASSWORD\"}"
+    local response=$(curl -s --max-time 15 -X POST \
         -H "Content-Type: application/json" \
-        -H "Authorization: Bearer dev-token" \
-        "$API_URL/api/v1/auth/me" 2>&1)
-    
-    if check_success "$response" || echo "$response" | grep -q '"id"\|"email"\|"user"'; then
-        print_success "Dev token authentication works"
-        print_info "Response: ${response:0:150}..."
-    else
-        print_fail "Dev token authentication failed"
-        print_info "Response: $response"
-    fi
-    
-    print_section "Registration Endpoint"
-    
-    # Test registration endpoint exists
-    print_test "Registration endpoint available"
-    response=$(curl -s --max-time 10 -X POST \
-        -H "Content-Type: application/json" \
-        -d '{"name":"Test","email":"test@test.com","password":"test123"}' \
+        -d "$register_payload" \
         "$API_URL/api/v1/auth/register" 2>&1)
-    
-    if echo "$response" | grep -q 'success\|error\|message\|user'; then
-        print_success "Registration endpoint is responding"
-    else
-        print_skip "Registration endpoint not available"
+
+    AUTH_TOKEN=$(echo "$response" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p' | head -1)
+
+    if [ -z "$AUTH_TOKEN" ]; then
+        print_info "Registration did not return token, trying login"
+        local login_payload="{\"email\":\"$TEST_EMAIL\",\"password\":\"$TEST_PASSWORD\"}"
+        response=$(curl -s --max-time 15 -X POST \
+            -H "Content-Type: application/json" \
+            -d "$login_payload" \
+            "$API_URL/api/v1/auth/login" 2>&1)
+        AUTH_TOKEN=$(echo "$response" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p' | head -1)
     fi
-    
-    print_section "Login Endpoint"
-    
-    # Test login endpoint exists
-    print_test "Login endpoint available"
-    response=$(curl -s --max-time 10 -X POST \
-        -H "Content-Type: application/json" \
-        -d '{"email":"test@test.com","password":"test123"}' \
-        "$API_URL/api/v1/auth/login" 2>&1)
-    
-    if echo "$response" | grep -q 'success\|error\|message\|token'; then
-        print_success "Login endpoint is responding"
+
+    if [ -n "$AUTH_TOKEN" ]; then
+        print_success "Authenticated test user"
     else
-        print_skip "Login endpoint not available"
+        print_fail "Authentication failed"
+        print_info "Response: ${response:0:180}..."
+        return 1
+    fi
+
+    print_section "Current User"
+    print_test "GET /api/v1/auth/me"
+    response=$(curl -s --max-time 10 \
+        -H "Authorization: Bearer $AUTH_TOKEN" \
+        "$API_URL/api/v1/auth/me" 2>&1)
+
+    if check_success "$response" || echo "$response" | grep -q '"user"\|"email"'; then
+        print_success "Authenticated user profile works"
+    else
+        print_fail "Authenticated user profile failed"
     fi
 }
 
@@ -214,7 +209,7 @@ test_projects() {
     
     # Create project
     print_test "POST /api/v1/projects"
-    local project_data="{\"name\":\"$TEST_PROJECT_NAME\",\"slug\":\"$TEST_PROJECT_SLUG\",\"gitUrl\":\"https://github.com/vercel/next.js\",\"defaultBranch\":\"main\"}"
+    local project_data="{\"name\":\"$TEST_PROJECT_NAME\",\"repositoryUrl\":\"https://github.com/vercel/next.js\",\"branch\":\"main\"}"
     
     response=$(curl -s --max-time 15 -X POST \
         -H "Content-Type: application/json" \
@@ -310,13 +305,13 @@ test_env_variables() {
     
     # Set env vars
     print_test "POST /api/v1/projects/:slug/env"
-    local env_data='{"variables":[{"key":"NODE_ENV","value":"production"},{"key":"TEST_VAR","value":"test123"}]}'
+    local env_data='{"variables":[{"key":"NODE_ENV","value":"production","environment":"production"},{"key":"TEST_VAR","value":"test123","environment":"production"}],"overwrite":true}'
     
     response=$(curl -s --max-time 10 -X POST \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer $AUTH_TOKEN" \
         -d "$env_data" \
-        "$API_URL/api/v1/projects/$TEST_PROJECT_SLUG/env" 2>&1)
+        "$API_URL/api/v1/projects/$TEST_PROJECT_SLUG/env/bulk" 2>&1)
     
     if check_success "$response" || echo "$response" | grep -q '"data"\|"key"\|NODE_ENV'; then
         print_success "Set env variables endpoint works"
@@ -350,7 +345,7 @@ test_databases() {
     
     # Create database
     print_test "POST /api/v1/databases"
-    local db_data="{\"name\":\"$TEST_DB_NAME\",\"type\":\"POSTGRESQL\",\"version\":\"15\"}"
+    local db_data="{\"name\":\"$TEST_DB_NAME\",\"type\":\"POSTGRESQL\",\"version\":\"15\",\"projectId\":\"$TEST_PROJECT_SLUG\"}"
     
     response=$(curl -s --max-time 15 -X POST \
         -H "Content-Type: application/json" \
@@ -540,7 +535,7 @@ test_ai_analysis() {
     local response=$(curl -s --max-time 15 -X POST \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer $AUTH_TOKEN" \
-        -d '{"repoUrl":"https://github.com/vercel/next.js"}' \
+        -d '{"files":["package.json","src/index.ts"],"dependencies":{"fastify":"^4.0.0"}}' \
         "$API_URL/api/v1/ai/analyze" 2>&1)
     
     if check_success "$response" || echo "$response" | grep -q '"framework"\|"security"\|"performance"'; then
@@ -556,7 +551,7 @@ test_ai_analysis() {
     response=$(curl -s --max-time 15 -X POST \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer $AUTH_TOKEN" \
-        -d '{"repoUrl":"https://github.com/vercel/next.js"}' \
+        -d '{"framework":"nextjs","language":"typescript","packageManager":"npm"}' \
         "$API_URL/api/v1/ai/dockerfile" 2>&1)
     
     if check_success "$response" || echo "$response" | grep -q '"dockerfile"\|FROM\|WORKDIR'; then
