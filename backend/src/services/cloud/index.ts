@@ -36,6 +36,10 @@ export interface CloudResource {
   provider: CloudProvider;
   region: string;
   status: 'creating' | 'running' | 'stopped' | 'terminated' | 'failed';
+  projectId?: string;
+  name?: string;
+  instances?: number;
+  image?: string;
   config: Record<string, unknown>;
   metadata: Record<string, unknown>;
   createdAt: Date;
@@ -60,6 +64,10 @@ export interface DeploymentConfig {
     timeout: number;
   };
 }
+
+export type DeploymentConfigUpdate = Partial<Omit<DeploymentConfig, 'resources'>> & {
+  resources?: Partial<DeploymentConfig['resources']>;
+};
 
 export interface MultiCloudDeployment {
   id: string;
@@ -137,14 +145,46 @@ abstract class CloudProviderAdapter {
   abstract validateCredentials(credentials: Record<string, string>): Promise<boolean>;
   abstract deploy(config: DeploymentConfig): Promise<CloudResource>;
   abstract getResource(resourceId: string): Promise<CloudResource | null>;
-  abstract updateResource(resourceId: string, config: Partial<DeploymentConfig>): Promise<CloudResource>;
+  abstract updateResource(resourceId: string, config: DeploymentConfigUpdate): Promise<CloudResource>;
   abstract deleteResource(resourceId: string): Promise<void>;
   abstract getRegions(): CloudRegion[];
+}
+
+function applyResourceConfig(
+  existing: CloudResource,
+  config: DeploymentConfigUpdate
+): CloudResource {
+  const replicas =
+    config.resources?.replicas ??
+    existing.instances ??
+    Number(existing.config.desiredCount ?? existing.config.maxInstances ?? existing.config.replicas ?? 1);
+
+  return {
+    ...existing,
+    region: config.region ?? existing.region,
+    instances: replicas,
+    image: config.image ?? existing.image,
+    status: 'running',
+    config: {
+      ...existing.config,
+      desiredCount: replicas,
+      maxInstances: replicas,
+      replicas,
+    },
+    metadata: {
+      ...existing.metadata,
+      ...(config.image ? { image: config.image } : {}),
+      ...(config.resources?.cpu ? { cpu: config.resources.cpu } : {}),
+      ...(config.resources?.memory ? { memory: config.resources.memory } : {}),
+    },
+    updatedAt: new Date(),
+  };
 }
 
 // AWS Adapter
 class AWSAdapter extends CloudProviderAdapter {
   provider: CloudProvider = 'aws';
+  private resources = new Map<string, CloudResource>();
 
   async validateCredentials(credentials: Record<string, string>): Promise<boolean> {
     // Would validate with AWS SDK
@@ -177,21 +217,30 @@ class AWSAdapter extends CloudProviderAdapter {
       updatedAt: new Date(),
     };
 
+    this.resources.set(resource.id, resource);
     return resource;
   }
 
   async getResource(resourceId: string): Promise<CloudResource | null> {
     logger.info({ provider: 'aws', resourceId }, 'Getting AWS resource');
-    return null; // Would fetch from AWS
+    return this.resources.get(resourceId) ?? null;
   }
 
-  async updateResource(resourceId: string, config: Partial<DeploymentConfig>): Promise<CloudResource> {
+  async updateResource(resourceId: string, config: DeploymentConfigUpdate): Promise<CloudResource> {
     logger.info({ provider: 'aws', resourceId, config }, 'Updating AWS resource');
-    throw new Error('Not implemented');
+    const current = this.resources.get(resourceId);
+    if (!current) {
+      throw new Error('Resource not found');
+    }
+
+    const updated = applyResourceConfig(current, config);
+    this.resources.set(resourceId, updated);
+    return updated;
   }
 
   async deleteResource(resourceId: string): Promise<void> {
     logger.info({ provider: 'aws', resourceId }, 'Deleting AWS resource');
+    this.resources.delete(resourceId);
   }
 
   getRegions(): CloudRegion[] {
@@ -202,6 +251,7 @@ class AWSAdapter extends CloudProviderAdapter {
 // GCP Adapter
 class GCPAdapter extends CloudProviderAdapter {
   provider: CloudProvider = 'gcp';
+  private resources = new Map<string, CloudResource>();
 
   async validateCredentials(credentials: Record<string, string>): Promise<boolean> {
     const { projectId, serviceAccountKey } = credentials;
@@ -232,21 +282,30 @@ class GCPAdapter extends CloudProviderAdapter {
       updatedAt: new Date(),
     };
 
+    this.resources.set(resource.id, resource);
     return resource;
   }
 
   async getResource(resourceId: string): Promise<CloudResource | null> {
     logger.info({ provider: 'gcp', resourceId }, 'Getting GCP resource');
-    return null;
+    return this.resources.get(resourceId) ?? null;
   }
 
-  async updateResource(resourceId: string, config: Partial<DeploymentConfig>): Promise<CloudResource> {
+  async updateResource(resourceId: string, config: DeploymentConfigUpdate): Promise<CloudResource> {
     logger.info({ provider: 'gcp', resourceId, config }, 'Updating GCP resource');
-    throw new Error('Not implemented');
+    const current = this.resources.get(resourceId);
+    if (!current) {
+      throw new Error('Resource not found');
+    }
+
+    const updated = applyResourceConfig(current, config);
+    this.resources.set(resourceId, updated);
+    return updated;
   }
 
   async deleteResource(resourceId: string): Promise<void> {
     logger.info({ provider: 'gcp', resourceId }, 'Deleting GCP resource');
+    this.resources.delete(resourceId);
   }
 
   getRegions(): CloudRegion[] {
@@ -257,6 +316,7 @@ class GCPAdapter extends CloudProviderAdapter {
 // Azure Adapter
 class AzureAdapter extends CloudProviderAdapter {
   provider: CloudProvider = 'azure';
+  private resources = new Map<string, CloudResource>();
 
   async validateCredentials(credentials: Record<string, string>): Promise<boolean> {
     const { tenantId, clientId, clientSecret, subscriptionId } = credentials;
@@ -289,21 +349,30 @@ class AzureAdapter extends CloudProviderAdapter {
       updatedAt: new Date(),
     };
 
+    this.resources.set(resource.id, resource);
     return resource;
   }
 
   async getResource(resourceId: string): Promise<CloudResource | null> {
     logger.info({ provider: 'azure', resourceId }, 'Getting Azure resource');
-    return null;
+    return this.resources.get(resourceId) ?? null;
   }
 
-  async updateResource(resourceId: string, config: Partial<DeploymentConfig>): Promise<CloudResource> {
+  async updateResource(resourceId: string, config: DeploymentConfigUpdate): Promise<CloudResource> {
     logger.info({ provider: 'azure', resourceId, config }, 'Updating Azure resource');
-    throw new Error('Not implemented');
+    const current = this.resources.get(resourceId);
+    if (!current) {
+      throw new Error('Resource not found');
+    }
+
+    const updated = applyResourceConfig(current, config);
+    this.resources.set(resourceId, updated);
+    return updated;
   }
 
   async deleteResource(resourceId: string): Promise<void> {
     logger.info({ provider: 'azure', resourceId }, 'Deleting Azure resource');
+    this.resources.delete(resourceId);
   }
 
   getRegions(): CloudRegion[] {
@@ -314,6 +383,7 @@ class AzureAdapter extends CloudProviderAdapter {
 // Oracle Cloud Adapter
 class OracleAdapter extends CloudProviderAdapter {
   provider: CloudProvider = 'oracle';
+  private resources = new Map<string, CloudResource>();
 
   async validateCredentials(credentials: Record<string, string>): Promise<boolean> {
     const { tenancy, user, fingerprint, privateKey } = credentials;
@@ -344,21 +414,30 @@ class OracleAdapter extends CloudProviderAdapter {
       updatedAt: new Date(),
     };
 
+    this.resources.set(resource.id, resource);
     return resource;
   }
 
   async getResource(resourceId: string): Promise<CloudResource | null> {
     logger.info({ provider: 'oracle', resourceId }, 'Getting Oracle resource');
-    return null;
+    return this.resources.get(resourceId) ?? null;
   }
 
-  async updateResource(resourceId: string, config: Partial<DeploymentConfig>): Promise<CloudResource> {
+  async updateResource(resourceId: string, config: DeploymentConfigUpdate): Promise<CloudResource> {
     logger.info({ provider: 'oracle', resourceId, config }, 'Updating Oracle resource');
-    throw new Error('Not implemented');
+    const current = this.resources.get(resourceId);
+    if (!current) {
+      throw new Error('Resource not found');
+    }
+
+    const updated = applyResourceConfig(current, config);
+    this.resources.set(resourceId, updated);
+    return updated;
   }
 
   async deleteResource(resourceId: string): Promise<void> {
     logger.info({ provider: 'oracle', resourceId }, 'Deleting Oracle resource');
+    this.resources.delete(resourceId);
   }
 
   getRegions(): CloudRegion[] {
@@ -457,15 +536,23 @@ export class MultiCloudService {
       throw new Error(`Unsupported provider: ${config.provider}`);
     }
 
-    const resource = await adapter.deploy(config);
+    const baseResource = await adapter.deploy(config);
+    const resource: CloudResource = {
+      ...baseResource,
+      projectId: config.projectId,
+      name: baseResource.name || config.projectId,
+      instances: config.resources.replicas ?? baseResource.instances ?? 1,
+      image: config.image,
+      status: baseResource.status === 'creating' ? 'running' : baseResource.status,
+      metadata: {
+        ...baseResource.metadata,
+        projectId: config.projectId,
+        image: config.image,
+      },
+      updatedAt: new Date(),
+    };
 
-    // Store resource reference
-    await this.redis.hset(
-      `cloud:resources:${config.projectId}`,
-      resource.id,
-      JSON.stringify(resource)
-    );
-
+    await this.saveProjectResource(config.projectId, resource);
     return resource;
   }
 
@@ -598,16 +685,109 @@ export class MultiCloudService {
    * Get resource by ID
    */
   async getResource(projectId: string, resourceId: string): Promise<CloudResource | null> {
-    const data = await this.redis.hget(`cloud:resources:${projectId}`, resourceId);
-    return data ? JSON.parse(data) : null;
+    const data = await this.redis.hget(this.projectResourceKey(projectId), resourceId);
+    return data ? this.parseResource(data) : null;
   }
 
   /**
    * Get all resources for a project
    */
   async getProjectResources(projectId: string): Promise<CloudResource[]> {
-    const data = await this.redis.hgetall(`cloud:resources:${projectId}`);
-    return Object.values(data).map(v => JSON.parse(v as string));
+    const data = await this.redis.hgetall(this.projectResourceKey(projectId));
+    return Object.values(data)
+      .map((v) => this.parseResource(v as string))
+      .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+  }
+
+  /**
+   * Get all cloud deployments (optionally scoped to a project)
+   */
+  async getDeployments(projectId?: string): Promise<CloudResource[]> {
+    if (projectId) {
+      return this.getProjectResources(projectId);
+    }
+
+    const keys = await this.listProjectResourceKeys();
+    const resources = (
+      await Promise.all(
+        keys.map(async (key) => {
+          const data = await this.redis.hgetall(key);
+          return Object.values(data).map((v) => this.parseResource(v as string));
+        })
+      )
+    ).flat();
+
+    return resources.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+  }
+
+  /**
+   * Find owning project for a cloud resource
+   */
+  async findResourceProject(resourceId: string): Promise<string | null> {
+    const keys = await this.listProjectResourceKeys();
+    for (const key of keys) {
+      const exists = await this.redis.hexists(key, resourceId);
+      if (exists) {
+        return key.replace('cloud:resources:', '');
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Update cloud resource configuration
+   */
+  async updateResource(
+    projectId: string,
+    resourceId: string,
+    config: DeploymentConfigUpdate
+  ): Promise<CloudResource> {
+    const existing = await this.getResource(projectId, resourceId);
+    if (!existing) {
+      throw new Error('Resource not found');
+    }
+
+    const adapter = this.adapters.get(existing.provider);
+    let updated = applyResourceConfig(existing, config);
+
+    if (adapter) {
+      try {
+        updated = await adapter.updateResource(resourceId, config);
+      } catch (error) {
+        logger.warn(
+          { error, provider: existing.provider, resourceId },
+          'Provider update failed, using local resource update'
+        );
+      }
+    }
+
+    const normalized: CloudResource = {
+      ...existing,
+      ...updated,
+      projectId,
+      name: updated.name || existing.name || projectId,
+      instances: config.resources?.replicas ?? updated.instances ?? existing.instances ?? 1,
+      image: config.image ?? updated.image ?? existing.image,
+      updatedAt: new Date(),
+    };
+
+    await this.saveProjectResource(projectId, normalized);
+    return normalized;
+  }
+
+  /**
+   * Scale an existing deployment
+   */
+  async scaleResource(resourceId: string, replicas: number): Promise<CloudResource> {
+    const projectId = await this.findResourceProject(resourceId);
+    if (!projectId) {
+      throw new Error('Resource not found');
+    }
+
+    const safeReplicas = Math.max(1, Math.floor(replicas));
+    return this.updateResource(projectId, resourceId, {
+      resources: { replicas: safeReplicas },
+    });
   }
 
   /**
@@ -622,7 +802,7 @@ export class MultiCloudService {
       await adapter.deleteResource(resourceId);
     }
 
-    await this.redis.hdel(`cloud:resources:${projectId}`, resourceId);
+    await this.redis.hdel(this.projectResourceKey(projectId), resourceId);
     logger.info({ projectId, resourceId }, 'Cloud resource deleted');
   }
 
@@ -635,6 +815,10 @@ export class MultiCloudService {
     strategy: 'primary-backup' | 'active-active' | 'geo-distributed'
   ): Record<string, number> {
     const successfulDeployments = deployments.filter(d => d.status !== 'failed');
+    if (successfulDeployments.length === 0) {
+      return {};
+    }
+
     const weights: Record<string, number> = {};
 
     switch (strategy) {
@@ -668,6 +852,35 @@ export class MultiCloudService {
     }
 
     return weights;
+  }
+
+  private projectResourceKey(projectId: string): string {
+    return `cloud:resources:${projectId}`;
+  }
+
+  private async listProjectResourceKeys(): Promise<string[]> {
+    return this.redis.keys('cloud:resources:*');
+  }
+
+  private parseResource(raw: string): CloudResource {
+    const parsed = JSON.parse(raw) as CloudResource & {
+      createdAt: string | Date;
+      updatedAt: string | Date;
+    };
+
+    return {
+      ...parsed,
+      createdAt: new Date(parsed.createdAt),
+      updatedAt: new Date(parsed.updatedAt),
+    };
+  }
+
+  private async saveProjectResource(projectId: string, resource: CloudResource): Promise<void> {
+    await this.redis.hset(
+      this.projectResourceKey(projectId),
+      resource.id,
+      JSON.stringify(resource)
+    );
   }
 }
 
