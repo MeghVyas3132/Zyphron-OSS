@@ -73,7 +73,7 @@ export default function DeploymentDetailPage() {
   useEffect(() => {
     if (!deployment || !isActive) return;
 
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000';
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3003';
     const ws = new WebSocket(`${wsUrl}/ws/deployments/${deploymentId}/logs`);
 
     ws.onopen = () => {

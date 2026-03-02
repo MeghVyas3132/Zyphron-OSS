@@ -35,7 +35,7 @@ export function DeploymentLogs({ deploymentId, projectId, status }: DeploymentLo
     }
 
     // Connect to WebSocket for live logs
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000';
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3003';
     const ws = new WebSocket(`${wsUrl}/ws/deployments/${deploymentId}/logs`);
     wsRef.current = ws;
 
@@ -86,7 +86,7 @@ export function DeploymentLogs({ deploymentId, projectId, status }: DeploymentLo
     try {
       const token = localStorage.getItem('auth-token');
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/projects/${projectId}/deployments/${deploymentId}/logs`,
+        `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003'}/api/v1/projects/${projectId}/deployments/${deploymentId}/logs`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
