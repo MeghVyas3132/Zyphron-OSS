@@ -8,8 +8,10 @@ import { prisma } from '@/lib/prisma.js';
 import { createLogger } from '@/lib/logger.js';
 import { sendDeploymentEvent } from '@/lib/kafka.js';
 import { publishEvent } from '@/lib/redis.js';
+import { TEAM_ROLES_MANAGE, projectWhereForUser } from '@/lib/project-access.js';
 import { createHmac, timingSafeEqual, randomBytes } from 'crypto';
 import type { Project } from '@prisma/client';
+import { createAuditLog } from '@/services/audit/index.js';
 
 const logger = createLogger('webhooks');
 
@@ -94,13 +96,7 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
 
     // Verify project ownership
     const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        OR: [
-          { userId },
-          { team: { members: { some: { userId } } } },
-        ],
-      },
+      where: projectWhereForUser(projectId, userId),
     });
 
     if (!project) {
@@ -108,7 +104,7 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const webhooks = await prisma.webhook.findMany({
-      where: { projectId },
+      where: { projectId: project.id },
       orderBy: { createdAt: 'desc' },
     });
 
@@ -139,13 +135,7 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
 
     // Verify project ownership
     const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        OR: [
-          { userId },
-          { team: { members: { some: { userId } } } },
-        ],
-      },
+      where: projectWhereForUser(projectId, userId, TEAM_ROLES_MANAGE),
     });
 
     if (!project) {
@@ -154,7 +144,7 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
 
     // Check for existing webhook with same provider
     const existingWebhook = await prisma.webhook.findFirst({
-      where: { projectId, provider: data.provider },
+      where: { projectId: project.id, provider: data.provider },
     });
 
     if (existingWebhook) {
@@ -168,7 +158,7 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
 
     const webhook = await prisma.webhook.create({
       data: {
-        projectId,
+        projectId: project.id,
         provider: data.provider,
         webhookId,
         secret,
@@ -177,12 +167,24 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
       },
     });
 
-    logger.info({ webhookId: webhook.id, projectId }, 'Webhook created');
+    logger.info({ webhookId: webhook.id, projectId: project.id }, 'Webhook created');
+    await createAuditLog({
+      userId,
+      action: 'webhook.create',
+      resourceType: 'webhook',
+      resourceId: webhook.id,
+      metadata: {
+        projectId: project.id,
+        provider: webhook.provider,
+        events: webhook.events,
+      },
+      request,
+    });
 
     return reply.code(201).send({
       webhook: {
         ...webhook,
-        webhookUrl: `${process.env.API_URL || 'http://api.localhost'}/api/v1/webhooks/github/${projectId}`,
+        webhookUrl: `${process.env.API_URL || 'http://api.localhost'}/api/v1/webhooks/github/${project.id}`,
       },
     });
   });
@@ -206,13 +208,7 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
 
     // Verify project ownership
     const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        OR: [
-          { userId },
-          { team: { members: { some: { userId } } } },
-        ],
-      },
+      where: projectWhereForUser(projectId, userId, TEAM_ROLES_MANAGE),
     });
 
     if (!project) {
@@ -220,7 +216,7 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const webhook = await prisma.webhook.findFirst({
-      where: { id: webhookId, projectId },
+      where: { id: webhookId, projectId: project.id },
     });
 
     if (!webhook) {
@@ -235,7 +231,18 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
       },
     });
 
-    logger.info({ webhookId, projectId }, 'Webhook updated');
+    logger.info({ webhookId, projectId: project.id }, 'Webhook updated');
+    await createAuditLog({
+      userId,
+      action: 'webhook.update',
+      resourceType: 'webhook',
+      resourceId: webhookId,
+      metadata: {
+        projectId: project.id,
+        changedFields: Object.keys(data),
+      },
+      request,
+    });
 
     return reply.send({
       webhook: {
@@ -254,13 +261,7 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
 
     // Verify project ownership
     const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        OR: [
-          { userId },
-          { team: { members: { some: { userId } } } },
-        ],
-      },
+      where: projectWhereForUser(projectId, userId, TEAM_ROLES_MANAGE),
     });
 
     if (!project) {
@@ -268,7 +269,7 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const webhook = await prisma.webhook.findFirst({
-      where: { id: webhookId, projectId },
+      where: { id: webhookId, projectId: project.id },
     });
 
     if (!webhook) {
@@ -279,7 +280,15 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
       where: { id: webhookId },
     });
 
-    logger.info({ webhookId, projectId }, 'Webhook deleted');
+    logger.info({ webhookId, projectId: project.id }, 'Webhook deleted');
+    await createAuditLog({
+      userId,
+      action: 'webhook.delete',
+      resourceType: 'webhook',
+      resourceId: webhookId,
+      metadata: { projectId: project.id },
+      request,
+    });
 
     return reply.code(204).send();
   });
@@ -293,13 +302,7 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
 
     // Verify project ownership
     const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        OR: [
-          { userId },
-          { team: { members: { some: { userId } } } },
-        ],
-      },
+      where: projectWhereForUser(projectId, userId, TEAM_ROLES_MANAGE),
     });
 
     if (!project) {
@@ -307,7 +310,7 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const webhook = await prisma.webhook.findFirst({
-      where: { id: webhookId, projectId },
+      where: { id: webhookId, projectId: project.id },
     });
 
     if (!webhook) {
@@ -321,7 +324,15 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
       data: { secret: newSecret },
     });
 
-    logger.info({ webhookId, projectId }, 'Webhook secret regenerated');
+    logger.info({ webhookId, projectId: project.id }, 'Webhook secret regenerated');
+    await createAuditLog({
+      userId,
+      action: 'webhook.regenerate_secret',
+      resourceType: 'webhook',
+      resourceId: webhookId,
+      metadata: { projectId: project.id },
+      request,
+    });
 
     return reply.send({
       webhook: {
@@ -347,8 +358,14 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
     logger.info({ projectId, event, deliveryId }, 'Received GitHub webhook');
 
     // Find project
-    const project = await prisma.project.findUnique({
-      where: { id: projectId },
+    const project = await prisma.project.findFirst({
+      where: {
+        OR: [
+          { id: projectId },
+          { slug: projectId },
+          { subdomain: projectId },
+        ],
+      },
       include: {
         webhooks: {
           where: { provider: 'GITHUB', isActive: true },

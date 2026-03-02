@@ -6,7 +6,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { prisma } from '@/lib/prisma.js';
 import { createLogger } from '@/lib/logger.js';
-import { getRedisClient } from '@/lib/redis.js';
+import { getGitHubToken } from '@/lib/github-token.js';
 
 const logger = createLogger('github');
 
@@ -515,25 +515,6 @@ export async function githubRoutes(app: FastifyInstance): Promise<void> {
       });
     }
   });
-}
-
-// ===========================================
-// HELPER FUNCTIONS
-// ===========================================
-
-// In production, this would fetch from a secure token store (Redis, Vault, etc.)
-async function getGitHubToken(userId: string): Promise<string | null> {
-  // For now, we'll use a simple approach - store token in user session
-  // In production, use encrypted storage or OAuth token refresh
-  const redis = getRedisClient();
-  const token = await redis.get(`github_token:${userId}`);
-  return token;
-}
-
-// Store GitHub token (called during OAuth callback)
-export async function storeGitHubToken(userId: string, token: string, expiresIn: number = 28800): Promise<void> {
-  const redis = getRedisClient();
-  await redis.setex(`github_token:${userId}`, expiresIn, token);
 }
 
 function detectFramework(files: string[], language: string | null): {
