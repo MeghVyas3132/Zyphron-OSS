@@ -5,6 +5,7 @@
 import { prisma } from '@/lib/prisma.js';
 import { createLogger } from '@/lib/logger.js';
 import { FastifyRequest } from 'fastify';
+import type { Prisma } from '@prisma/client';
 
 const logger = createLogger('audit');
 
@@ -102,7 +103,7 @@ export async function createAuditLog(input: AuditLogInput): Promise<void> {
         action: input.action,
         resourceType: input.resourceType,
         resourceId: input.resourceId,
-        metadata: input.metadata as unknown as Record<string, unknown> | undefined,
+        metadata: input.metadata as Prisma.InputJsonValue | undefined,
         ipAddress,
         userAgent,
       },
