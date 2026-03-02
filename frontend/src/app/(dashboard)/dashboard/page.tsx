@@ -30,16 +30,19 @@ interface RecentDeployment {
 }
 
 const statusConfig = {
-  QUEUED: { icon: Clock, color: 'text-yellow-500', bg: 'bg-yellow-500/10' },
-  PENDING: { icon: Clock, color: 'text-yellow-500', bg: 'bg-yellow-500/10' },
-  BUILDING: { icon: Loader2, color: 'text-blue-500', bg: 'bg-blue-500/10', animate: true },
-  DEPLOYING: { icon: Loader2, color: 'text-blue-500', bg: 'bg-blue-500/10', animate: true },
-  LIVE: { icon: CheckCircle2, color: 'text-green-500', bg: 'bg-green-500/10' },
-  READY: { icon: CheckCircle2, color: 'text-green-500', bg: 'bg-green-500/10' },
-  FAILED: { icon: XCircle, color: 'text-red-500', bg: 'bg-red-500/10' },
-  CANCELLED: { icon: XCircle, color: 'text-gray-500', bg: 'bg-gray-500/10' },
-  ROLLING_BACK: { icon: Loader2, color: 'text-orange-500', bg: 'bg-orange-500/10', animate: true },
-};
+  QUEUED: { icon: Clock, color: 'text-foreground/70', bg: 'bg-foreground/5' },
+  PENDING: { icon: Clock, color: 'text-foreground/70', bg: 'bg-foreground/5' },
+  BUILDING: { icon: Loader2, color: 'text-foreground/80', bg: 'bg-foreground/10', animate: true },
+  DEPLOYING: { icon: Loader2, color: 'text-foreground/80', bg: 'bg-foreground/10', animate: true },
+  LIVE: { icon: CheckCircle2, color: 'text-foreground', bg: 'bg-foreground/15' },
+  READY: { icon: CheckCircle2, color: 'text-foreground', bg: 'bg-foreground/15' },
+  FAILED: { icon: XCircle, color: 'text-foreground/60', bg: 'bg-foreground/5' },
+  CANCELLED: { icon: XCircle, color: 'text-foreground/60', bg: 'bg-foreground/5' },
+  ROLLING_BACK: { icon: Loader2, color: 'text-foreground/80', bg: 'bg-foreground/10', animate: true },
+} satisfies Record<
+  RecentDeployment['status'],
+  { icon: React.ElementType; color: string; bg: string; animate?: boolean }
+>;
 
 export default function DashboardPage() {
   const { data, isLoading, isError, error, refetch } = useDashboardMetrics();
@@ -74,11 +77,11 @@ export default function DashboardPage() {
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between stagger-in">
         <div>
-          <h1 className="text-3xl font-bold">Dashboard</h1>
+          <h1 className="text-3xl font-semibold mono-text-gradient">Dashboard</h1>
           <p className="text-muted-foreground mt-1">
-            Welcome back! Here's an overview of your projects.
+            Live operating view across your deployment system.
           </p>
         </div>
         <Button onClick={() => refetch()} variant="outline" size="icon">
@@ -123,7 +126,7 @@ export default function DashboardPage() {
           </Link>
         </div>
 
-        <div className="rounded-lg border bg-card">
+        <div className="premium-panel">
           {recentActivity.length === 0 ? (
             <div className="p-8 text-center">
               <p className="text-muted-foreground">No deployments yet</p>
@@ -141,13 +144,13 @@ export default function DashboardPage() {
                   <Link
                     key={deployment.id}
                     href={`/projects/${deployment.projectSlug}`}
-                    className="flex items-center justify-between p-4 hover:bg-muted/50 transition-colors"
+                    className="flex items-center justify-between p-4 hover:bg-muted/40 transition-colors"
                   >
                     <div className="flex items-center gap-4">
                       <div className={`p-2 rounded-lg ${config.bg}`}>
                         <StatusIcon
                           className={`h-4 w-4 ${config.color} ${
-                            config.animate ? 'animate-spin' : ''
+                            'animate' in config && config.animate ? 'animate-spin' : ''
                           }`}
                         />
                       </div>
@@ -183,8 +186,8 @@ export default function DashboardPage() {
         <h2 className="text-xl font-semibold">Quick Actions</h2>
         <div className="grid gap-4 md:grid-cols-3">
           <Link href="/projects/new">
-            <div className="rounded-lg border bg-card p-6 hover:border-primary transition-colors cursor-pointer">
-              <FolderKanban className="h-8 w-8 text-primary mb-4" />
+            <div className="premium-panel premium-card-hover p-6 cursor-pointer">
+              <FolderKanban className="h-8 w-8 text-foreground mb-4" />
               <h3 className="font-semibold">Create Project</h3>
               <p className="text-sm text-muted-foreground mt-1">
                 Deploy a new application from Git
@@ -192,8 +195,8 @@ export default function DashboardPage() {
             </div>
           </Link>
           <Link href="/databases/new">
-            <div className="rounded-lg border bg-card p-6 hover:border-primary transition-colors cursor-pointer">
-              <Database className="h-8 w-8 text-primary mb-4" />
+            <div className="premium-panel premium-card-hover p-6 cursor-pointer">
+              <Database className="h-8 w-8 text-foreground mb-4" />
               <h3 className="font-semibold">Create Database</h3>
               <p className="text-sm text-muted-foreground mt-1">
                 Provision a managed database
@@ -201,8 +204,8 @@ export default function DashboardPage() {
             </div>
           </Link>
           <Link href="/docs">
-            <div className="rounded-lg border bg-card p-6 hover:border-primary transition-colors cursor-pointer">
-              <Activity className="h-8 w-8 text-primary mb-4" />
+            <div className="premium-panel premium-card-hover p-6 cursor-pointer">
+              <Activity className="h-8 w-8 text-foreground mb-4" />
               <h3 className="font-semibold">View Documentation</h3>
               <p className="text-sm text-muted-foreground mt-1">
                 Learn how to use Zyphron
@@ -229,17 +232,17 @@ function StatCard({
   trend?: { value: number; positive: boolean };
 }) {
   const content = (
-    <div className="rounded-lg border bg-card p-6">
+    <div className="premium-panel premium-card-hover p-6">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">{title}</p>
-        <Icon className="h-5 w-5 text-muted-foreground" />
+        <Icon className="h-5 w-5 text-foreground/70" />
       </div>
       <div className="mt-2 flex items-baseline gap-2">
-        <p className="text-3xl font-bold">{value}</p>
+        <p className="text-3xl font-semibold">{value}</p>
         {trend && (
           <span
             className={`text-sm ${
-              trend.positive ? 'text-green-500' : 'text-red-500'
+              trend.positive ? 'text-foreground' : 'text-foreground/70'
             }`}
           >
             {trend.positive ? '+' : '-'}{trend.value}%
