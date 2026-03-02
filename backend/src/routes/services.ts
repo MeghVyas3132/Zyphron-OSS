@@ -7,9 +7,14 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma.js';
 import { createLogger } from '@/lib/logger.js';
+import { getGitService } from '@/services/git/index.js';
 import { getMultiServiceDetector } from '@/services/detector/multi-service.js';
+import { getGitHubToken } from '@/lib/github-token.js';
+import { createAuditLog } from '@/services/audit/index.js';
 
 const logger = createLogger('services');
+const gitService = getGitService('/tmp/zyphron/repos');
+const multiServiceDetector = getMultiServiceDetector();
 
 // ===========================================
 // VALIDATION SCHEMAS
@@ -43,8 +48,6 @@ const detectServicesSchema = z.object({
 // ===========================================
 
 export async function serviceRoutes(app: FastifyInstance): Promise<void> {
-  const multiServiceDetector = getMultiServiceDetector();
-
   // ===========================================
   // LIST SERVICES FOR A PROJECT
   // ===========================================
@@ -139,23 +142,128 @@ export async function serviceRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
+    const cloneRef = `service-detect-${project.id}-${Date.now()}`;
+
     try {
-      // Clone repo and detect services
-      // For now, we'll return a placeholder - actual implementation needs git clone
-      const projectPath = `/var/www/projects/${projectId}`;
-      
-      // This would normally be called after cloning
-      // const config = await multiServiceDetector.detect(projectPath);
-      
-      // For API purposes, return what we can detect from existing data
-      logger.info({ projectId, userId }, 'Service detection requested');
+      logger.info({ projectId, userId, force }, 'Service detection requested');
+
+      const gitToken = project.repositoryProvider === 'GITHUB'
+        ? await getGitHubToken(project.userId)
+        : null;
+
+      const cloneResult = await gitService.cloneRepository(
+        project.repositoryUrl,
+        cloneRef,
+        project.branch || 'main',
+        gitToken || undefined
+      );
+
+      if (!cloneResult.success) {
+        throw new Error(cloneResult.error || 'Failed to clone repository');
+      }
+
+      const config = await multiServiceDetector.detect(cloneResult.path);
+      const detectedServices = config.services;
+
+      if (force) {
+        await prisma.service.deleteMany({ where: { projectId } });
+      }
+
+      const persistedServices = [];
+      for (const svc of detectedServices) {
+        const slug = svc.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        const type = svc.type === 'managed' ? 'MANAGED' : svc.type === 'custom' ? 'CUSTOM' : 'APP';
+        const port = svc.port || svc.detection?.port || 3000;
+
+        const upserted = await prisma.service.upsert({
+          where: {
+            projectId_name: {
+              projectId,
+              name: svc.name,
+            },
+          },
+          create: {
+            projectId,
+            name: svc.name,
+            slug,
+            path: svc.path || '.',
+            type,
+            framework: svc.detection?.framework,
+            language: svc.detection?.language,
+            dockerfile: svc.dockerfile,
+            dockerContext: svc.buildContext,
+            image: svc.image,
+            port,
+            exposedPort: svc.exposedPort,
+            internalOnly: svc.internalOnly ?? false,
+            dependsOn: svc.dependsOn || [],
+            buildCommand: svc.detection?.buildCommand,
+            installCommand: svc.detection?.installCommand,
+            startCommand: svc.detection?.startCommand,
+            cpuLimit: svc.resources?.cpu || '0.5',
+            memoryLimit: svc.resources?.memory || '512m',
+            healthCheckPath: svc.healthCheck?.path,
+          },
+          update: {
+            slug,
+            path: svc.path || '.',
+            type,
+            framework: svc.detection?.framework,
+            language: svc.detection?.language,
+            dockerfile: svc.dockerfile,
+            dockerContext: svc.buildContext,
+            image: svc.image,
+            port,
+            exposedPort: svc.exposedPort,
+            internalOnly: svc.internalOnly ?? false,
+            dependsOn: svc.dependsOn || [],
+            buildCommand: svc.detection?.buildCommand,
+            installCommand: svc.detection?.installCommand,
+            startCommand: svc.detection?.startCommand,
+            cpuLimit: svc.resources?.cpu || '0.5',
+            memoryLimit: svc.resources?.memory || '512m',
+            healthCheckPath: svc.healthCheck?.path,
+          },
+        });
+
+        persistedServices.push(upserted);
+      }
+
+      const isMultiService = detectedServices.length > 1 ||
+        config.managedServices.length > 0 ||
+        config.detectionSource !== 'single';
+
+      await prisma.project.update({
+        where: { id: projectId },
+        data: {
+          isMultiService,
+          serviceDetectionSource: config.detectionSource,
+        },
+      });
+
+      await createAuditLog({
+        userId,
+        action: 'service.update',
+        resourceType: 'project',
+        resourceId: projectId,
+        metadata: {
+          force,
+          detectedServices: detectedServices.length,
+          detectionSource: config.detectionSource,
+          managedServices: config.managedServices.length,
+        },
+        request,
+      });
 
       return reply.send({
         success: true,
         data: {
-          message: 'Service detection requires repository clone. Trigger a deployment to detect services automatically.',
-          services: project.services,
-          isMultiService: project.isMultiService,
+          message: 'Service detection completed',
+          services: persistedServices,
+          isMultiService,
+          detectionSource: config.detectionSource,
+          managedServices: config.managedServices,
+          cached: false,
         },
       });
     } catch (error) {
@@ -169,6 +277,8 @@ export async function serviceRoutes(app: FastifyInstance): Promise<void> {
           message: errorMessage,
         },
       });
+    } finally {
+      await gitService.cleanup(cloneRef);
     }
   });
 
@@ -452,7 +562,7 @@ export async function serviceRoutes(app: FastifyInstance): Promise<void> {
   }>, reply: FastifyReply) => {
     const userId = request.user?.id as string;
     const { projectId, serviceId } = request.params;
-    const { deploymentId, lines = '100' } = request.query;
+    const { deploymentId } = request.query;
 
     const service = await prisma.service.findFirst({
       where: {
