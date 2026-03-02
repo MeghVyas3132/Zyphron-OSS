@@ -36,7 +36,10 @@ const statusConfig = {
   FAILED: { icon: XCircle, color: 'text-red-500', bg: 'bg-red-500/10', label: 'Failed' },
   CANCELLED: { icon: XCircle, color: 'text-gray-500', bg: 'bg-gray-500/10', label: 'Cancelled' },
   ROLLING_BACK: { icon: Loader2, color: 'text-orange-500', bg: 'bg-orange-500/10', label: 'Rolling Back', animate: true },
-};
+} satisfies Record<
+  Exclude<Deployment['status'], 'CANCELLED'> | 'CANCELLED' | 'QUEUED' | 'LIVE' | 'ROLLING_BACK',
+  { icon: React.ElementType; color: string; bg: string; label: string; animate?: boolean }
+>;
 
 const frameworkIcons: Record<string, string> = {
   nextjs: '▲',
@@ -80,7 +83,7 @@ export default function ProjectDetailPage() {
 
   const handleDeploy = async () => {
     try {
-      await deployMutation.mutateAsync({ branch: project?.defaultBranch });
+      await deployMutation.mutateAsync({ branch: project?.defaultBranch || project?.branch || undefined });
       refetchDeployments();
     } catch (error) {
       console.error('Failed to deploy:', error);
@@ -143,7 +146,7 @@ export default function ProjectDetailPage() {
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
               <div className="flex items-center gap-1">
                 <GitBranch className="h-4 w-4" />
-                <span>{project.defaultBranch}</span>
+                <span>{project.defaultBranch || project.branch || 'main'}</span>
               </div>
               {project.productionUrl && (
                 <a
@@ -242,7 +245,7 @@ export default function ProjectDetailPage() {
                         <div className={`p-2 rounded-lg ${config.bg}`}>
                           <StatusIcon
                             className={`h-4 w-4 ${config.color} ${
-                              config.animate ? 'animate-spin' : ''
+                              'animate' in config && config.animate ? 'animate-spin' : ''
                             }`}
                           />
                         </div>
