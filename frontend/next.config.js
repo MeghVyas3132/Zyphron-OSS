@@ -5,7 +5,7 @@ const nextConfig = {
   
   // Environment variables available on the client
   env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000',
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003',
     NEXT_PUBLIC_APP_NAME: 'Zyphron',
     NEXT_PUBLIC_APP_VERSION: '1.0.0',
   },
@@ -22,23 +22,6 @@ const nextConfig = {
         hostname: 'github.com',
       },
     ],
-  },
-
-  // Redirects
-  async redirects() {
-    return [
-      {
-        source: '/',
-        destination: '/dashboard',
-        permanent: false,
-        has: [
-          {
-            type: 'cookie',
-            key: 'auth-token',
-          },
-        ],
-      },
-    ];
   },
 
   // Headers for security
