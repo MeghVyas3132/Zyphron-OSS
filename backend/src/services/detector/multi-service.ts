@@ -75,11 +75,13 @@ export interface ManagedServiceRequest {
   config?: Record<string, unknown>;
 }
 
+type ManagedServiceType = ManagedServiceRequest['type'];
+
 // ===========================================
 // MANAGED SERVICE DEFINITIONS
 // ===========================================
 
-const MANAGED_SERVICES: Record<string, {
+const MANAGED_SERVICES: Record<ManagedServiceType, {
   image: string;
   defaultPort: number;
   envTemplate: Record<string, string>;
@@ -376,7 +378,7 @@ export class MultiServiceDetector {
     const managedServices: ManagedServiceRequest[] = [];
     
     // Read turbo.json for pipeline configuration
-    const turboJson = JSON.parse(await fs.readFile(path.join(projectPath, 'turbo.json'), 'utf-8'));
+    await fs.readFile(path.join(projectPath, 'turbo.json'), 'utf-8');
     
     // Read package.json for workspace configuration
     const packageJson = JSON.parse(await fs.readFile(path.join(projectPath, 'package.json'), 'utf-8'));
@@ -830,7 +832,8 @@ export class MultiServiceDetector {
     }
     
     // Skip if no entry point for running
-    if (!packageJson.main && !packageJson.scripts?.start && !packageJson.scripts?.dev) {
+    const scripts = (packageJson.scripts as Record<string, unknown> | undefined) || {};
+    if (!packageJson.main && !scripts.start && !scripts.dev) {
       return true;
     }
     
@@ -895,7 +898,7 @@ export class MultiServiceDetector {
     return [...new Set(deps)];
   }
   
-  private detectManagedServiceNeeds(projectPath: string, services: ServiceDefinition[]): ManagedServiceRequest[] {
+  private detectManagedServiceNeeds(_projectPath: string, services: ServiceDefinition[]): ManagedServiceRequest[] {
     const needs: ManagedServiceRequest[] = [];
     const existingManaged = new Set(services.filter(s => s.type === 'managed').map(s => s.name));
     
@@ -913,9 +916,9 @@ export class MultiServiceDetector {
       if (services.some(s => s.name === dep)) continue;
       
       // Check if it's a managed service type
-      if (MANAGED_SERVICES[dep as keyof typeof MANAGED_SERVICES]) {
+      if (MANAGED_SERVICES[dep as ManagedServiceType]) {
         needs.push({
-          type: dep as keyof typeof MANAGED_SERVICES,
+          type: dep as ManagedServiceType,
           name: dep,
         });
       }
@@ -929,7 +932,7 @@ export class MultiServiceDetector {
     
     for (const service of services) {
       for (const dep of service.dependsOn || []) {
-        if (!serviceNames.has(dep) && !MANAGED_SERVICES[dep as keyof typeof MANAGED_SERVICES]) {
+        if (!serviceNames.has(dep) && !MANAGED_SERVICES[dep as ManagedServiceType]) {
           logger.warn({ service: service.name, dependency: dep }, 'Unknown dependency');
         }
       }
