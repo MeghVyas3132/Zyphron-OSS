@@ -7,7 +7,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
 // ===========================================
 // TYPES
@@ -25,10 +25,12 @@ export interface CloudRegion {
 
 export interface CloudResource {
   id: string;
+  name?: string;
   type: 'container' | 'function' | 'database' | 'storage' | 'cdn';
   provider: CloudProvider;
   region: string;
   status: string;
+  instances?: number;
   config: Record<string, unknown>;
   createdAt: string;
 }
@@ -138,11 +140,13 @@ export function useScaleDeployment() {
   return useMutation({
     mutationFn: async (params: {
       deploymentId: string;
-      replicas: number;
+      replicas?: number;
+      instances?: number;
     }) => {
+      const replicas = params.replicas ?? params.instances ?? 1;
       return cloudApi<{ success: boolean }>(`/deployments/${params.deploymentId}/scale`, {
         method: 'POST',
-        body: JSON.stringify({ replicas: params.replicas }),
+        body: JSON.stringify({ replicas }),
       });
     },
     onSuccess: () => {
@@ -211,6 +215,42 @@ export function useCostEstimate() {
         body: JSON.stringify(params),
       });
     },
+  });
+}
+
+export interface CloudCostEstimate {
+  monthly: number;
+  breakdown: {
+    compute: number;
+    networking: number;
+    storage: number;
+  };
+}
+
+export function useCloudCostEstimate(provider: string) {
+  return useQuery({
+    queryKey: ['cloud', 'cost-estimate', provider],
+    queryFn: async () => {
+      const estimate = await cloudApi<CostEstimate>('/estimate', {
+        method: 'POST',
+        body: JSON.stringify({
+          provider,
+          region: 'us-east-1',
+          cpu: '1',
+          memory: '1Gi',
+          hoursPerMonth: 730,
+        }),
+      });
+      const compute = estimate.breakdown.find((item) => item.item.toLowerCase().includes('compute'))?.cost ?? 0;
+      const networking =
+        estimate.breakdown.find((item) => item.item.toLowerCase().includes('network'))?.cost ?? 0;
+      const storage = estimate.breakdown.find((item) => item.item.toLowerCase().includes('storage'))?.cost ?? 0;
+      return {
+        monthly: estimate.estimated,
+        breakdown: { compute, networking, storage },
+      } as CloudCostEstimate;
+    },
+    enabled: !!provider,
   });
 }
 

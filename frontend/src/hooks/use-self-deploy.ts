@@ -19,24 +19,57 @@ export interface HealthCheckResult {
 
 export interface DeploymentStatus {
   id: string;
-  status: 'pending' | 'deploying' | 'running' | 'failed' | 'rolled-back';
+  status:
+    | 'pending'
+    | 'deploying'
+    | 'in-progress'
+    | 'running'
+    | 'completed'
+    | 'failed'
+    | 'rolled-back';
   version: string;
   previousVersion?: string;
+  fromVersion?: string;
+  toVersion?: string;
+  strategy?: 'rolling' | 'blue-green' | 'canary';
+  progress?: {
+    phase?: string;
+    currentPhase?: string;
+    percentage: number;
+  };
   startedAt: string;
   completedAt?: string;
-  components: {
-    api: ComponentStatus;
-    worker: ComponentStatus;
-    frontend: ComponentStatus;
-  };
+  components:
+    | {
+        api: ComponentStatus;
+        worker: ComponentStatus;
+        frontend: ComponentStatus;
+      }
+    | string[];
   healthChecks: HealthCheckResult[];
   logs: string[];
 }
 
 export interface SystemHealth {
+  status?: 'healthy' | 'degraded' | 'unhealthy';
   healthy: boolean;
-  components: Record<string, { healthy: boolean; latency: number }>;
-  version: string;
+  components: Record<
+    string,
+    {
+      healthy?: boolean;
+      latency?: number;
+      status?: 'healthy' | 'degraded' | 'unhealthy';
+      cpu?: string;
+      memory?: string;
+      version?: string;
+    }
+  >;
+  version?: string;
+  uptime?: string;
+  containers?: {
+    running: number;
+    total: number;
+  };
 }
 
 export interface DeployInput {
@@ -60,7 +93,10 @@ export function useSystemHealth() {
     queryKey: ['self-deploy', 'health'],
     queryFn: async () => {
       const response = await api.get<SystemHealth>('/self-deploy/health');
-      return response;
+      if (response?.data && typeof response.data === 'object' && 'components' in response.data) {
+        return response.data as SystemHealth;
+      }
+      return response as unknown as SystemHealth;
     },
     refetchInterval: 30000, // Refresh every 30 seconds
   });
@@ -72,7 +108,13 @@ export function useCurrentVersion() {
     queryKey: ['self-deploy', 'version'],
     queryFn: async () => {
       const response = await api.get<{ version: string }>('/self-deploy/version');
-      return response.version;
+      if (typeof response.version === 'string') {
+        return response.version;
+      }
+      if (response?.data && typeof response.data === 'object' && 'version' in response.data) {
+        return String((response.data as { version: string }).version);
+      }
+      return '';
     },
     staleTime: 60000, // 1 minute
   });
@@ -87,7 +129,13 @@ export function useDeploymentManifest(version?: string) {
         ? `/self-deploy/manifest?version=${version}`
         : '/self-deploy/manifest';
       const response = await api.get<{ manifest: Record<string, unknown> }>(url);
-      return response.manifest;
+      if (response?.manifest && typeof response.manifest === 'object') {
+        return response.manifest;
+      }
+      if (response?.data && typeof response.data === 'object' && 'manifest' in response.data) {
+        return (response.data as { manifest: Record<string, unknown> }).manifest;
+      }
+      return {};
     },
   });
 }
@@ -102,7 +150,13 @@ export function useSelfDeploy() {
         '/self-deploy/deploy',
         input
       );
-      return response.deployment;
+      if (response?.deployment) {
+        return response.deployment;
+      }
+      if (response?.data && typeof response.data === 'object' && 'deployment' in response.data) {
+        return (response.data as { deployment: DeploymentStatus }).deployment;
+      }
+      return response as unknown as DeploymentStatus;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['self-deploy', 'deployments'] });
@@ -120,7 +174,13 @@ export function useDeploymentStatus(deploymentId: string) {
       const response = await api.get<{ deployment: DeploymentStatus }>(
         `/self-deploy/deployments/${deploymentId}`
       );
-      return response.deployment;
+      if (response?.deployment) {
+        return response.deployment;
+      }
+      if (response?.data && typeof response.data === 'object' && 'deployment' in response.data) {
+        return (response.data as { deployment: DeploymentStatus }).deployment;
+      }
+      return response as unknown as DeploymentStatus;
     },
     enabled: !!deploymentId,
     refetchInterval: (query) => {
@@ -141,7 +201,13 @@ export function useSelfDeployments(limit = 10) {
       const response = await api.get<{ deployments: DeploymentStatus[] }>(
         `/self-deploy/deployments?limit=${limit}`
       );
-      return response.deployments;
+      if (Array.isArray(response?.deployments)) {
+        return response.deployments;
+      }
+      if (response?.data && typeof response.data === 'object' && 'deployments' in response.data) {
+        return (response.data as { deployments: DeploymentStatus[] }).deployments;
+      }
+      return [];
     },
   });
 }
@@ -155,7 +221,13 @@ export function useRollbackDeployment() {
       const response = await api.post<{ deployment: DeploymentStatus }>(
         `/self-deploy/deployments/${deploymentId}/rollback`
       );
-      return response.deployment;
+      if (response?.deployment) {
+        return response.deployment;
+      }
+      if (response?.data && typeof response.data === 'object' && 'deployment' in response.data) {
+        return (response.data as { deployment: DeploymentStatus }).deployment;
+      }
+      return response as unknown as DeploymentStatus;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['self-deploy'] });

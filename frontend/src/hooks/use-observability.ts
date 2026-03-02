@@ -7,7 +7,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
 // ===========================================
 // TYPES
@@ -26,6 +26,7 @@ export interface Alert {
   };
   status: 'active' | 'firing' | 'resolved' | 'silenced';
   severity: 'critical' | 'warning' | 'info';
+  message?: string;
   lastFiredAt?: string;
 }
 
@@ -55,6 +56,15 @@ export interface DeploymentMetrics {
   memoryUsage: number;
   networkIn: number;
   networkOut: number;
+}
+
+export interface Trace {
+  id: string;
+  service: string;
+  operation: string;
+  duration: number;
+  status: string;
+  timestamp: string;
 }
 
 // ===========================================
@@ -90,12 +100,19 @@ export function useDeploymentMetrics(deploymentId: string) {
 }
 
 // Generic metrics hook for project-level metrics
-export function useMetrics(params: { projectId: string; range?: string }) {
+export function useMetrics(params: { projectId: string; range?: string; period?: string }) {
   return useQuery({
-    queryKey: ['observability', 'metrics', 'project', params.projectId, params.range],
+    queryKey: [
+      'observability',
+      'metrics',
+      'project',
+      params.projectId,
+      params.range || params.period,
+    ],
     queryFn: async () => {
       const searchParams = new URLSearchParams();
-      if (params.range) searchParams.set('range', params.range);
+      const range = params.range || params.period;
+      if (range) searchParams.set('range', range);
       const data = await obsApi<{ metrics: DeploymentMetrics[] }>(
         `/projects/${params.projectId}/metrics?${searchParams.toString()}`
       );
@@ -113,7 +130,7 @@ export function useTraces(params: { projectId: string; limit?: number }) {
     queryFn: async () => {
       const searchParams = new URLSearchParams();
       if (params.limit) searchParams.set('limit', String(params.limit));
-      const data = await obsApi<{ traces: unknown[] }>(
+      const data = await obsApi<{ traces: Trace[] }>(
         `/projects/${params.projectId}/traces?${searchParams.toString()}`
       );
       return data.traces;
@@ -216,6 +233,8 @@ export function useProjectDashboards(projectId: string) {
     enabled: !!projectId,
   });
 }
+
+export const useDashboards = useProjectDashboards;
 
 export function useDashboard(dashboardId: string) {
   return useQuery({

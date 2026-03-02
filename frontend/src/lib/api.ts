@@ -3,12 +3,14 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 export class ApiError extends Error {
   status: number;
   data?: unknown;
+  response?: { status: number; data?: unknown };
 
   constructor(message: string, status: number, data?: unknown) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.data = data;
+    this.response = { status, data };
   }
 }
 
@@ -70,6 +72,27 @@ async function request<T>(
   }
 
   return data as T;
+}
+
+type ApiCompatResponse<T> = (T extends Record<string, unknown> ? T : Record<string, never>) & {
+  data: T;
+};
+
+function withApiPrefix(endpoint: string): string {
+  if (endpoint.startsWith('/api/')) {
+    return endpoint;
+  }
+  return endpoint.startsWith('/api')
+    ? endpoint
+    : `/api/v1${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+}
+
+async function requestCompat<T>(endpoint: string, config: RequestConfig): Promise<ApiCompatResponse<T>> {
+  const payload = await request<T>(withApiPrefix(endpoint), config);
+  if (typeof payload === 'object' && payload !== null) {
+    return { ...(payload as Record<string, unknown>), data: payload } as ApiCompatResponse<T>;
+  }
+  return { data: payload } as ApiCompatResponse<T>;
 }
 
 // API Response types
@@ -245,6 +268,12 @@ export interface Project {
   _count?: {
     deployments: number;
   };
+  // Legacy aliases used by older dashboard pages.
+  defaultBranch?: string | null;
+  repoUrl?: string | null;
+  rootDir?: string | null;
+  outputDir?: string | null;
+  lastDeployedAt?: string | null;
 }
 
 export interface CreateProjectInput {
@@ -262,10 +291,19 @@ export interface CreateProjectInput {
 
 export interface UpdateProjectInput {
   name?: string;
+  framework?: string;
+  branch?: string;
+  defaultBranch?: string;
+  repoUrl?: string;
+  repositoryUrl?: string;
   buildCommand?: string;
+  startCommand?: string;
   outputDirectory?: string;
+  outputDir?: string;
   installCommand?: string;
   rootDirectory?: string;
+  rootDir?: string;
+  autoDeploy?: boolean;
 }
 
 export interface Deployment {
@@ -339,3 +377,29 @@ export interface DashboardMetrics {
 
 // Export the base request function for custom endpoints
 export { request };
+
+// Backward-compatible axios-like API client used by legacy hooks.
+export const api = {
+  get: <T = any>(endpoint: string, config?: Omit<RequestConfig, 'method' | 'body'>) =>
+    requestCompat<T>(endpoint, { ...(config || {}), method: 'GET' }),
+  post: <T = any>(endpoint: string, body?: unknown, config?: Omit<RequestConfig, 'method' | 'body'>) =>
+    requestCompat<T>(endpoint, {
+      ...(config || {}),
+      method: 'POST',
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }),
+  put: <T = any>(endpoint: string, body?: unknown, config?: Omit<RequestConfig, 'method' | 'body'>) =>
+    requestCompat<T>(endpoint, {
+      ...(config || {}),
+      method: 'PUT',
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }),
+  patch: <T = any>(endpoint: string, body?: unknown, config?: Omit<RequestConfig, 'method' | 'body'>) =>
+    requestCompat<T>(endpoint, {
+      ...(config || {}),
+      method: 'PATCH',
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }),
+  delete: <T = any>(endpoint: string, config?: Omit<RequestConfig, 'method' | 'body'>) =>
+    requestCompat<T>(endpoint, { ...(config || {}), method: 'DELETE' }),
+};

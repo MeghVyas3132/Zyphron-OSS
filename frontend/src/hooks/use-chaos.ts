@@ -7,7 +7,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
 // ===========================================
 // TYPES
@@ -24,7 +24,7 @@ export type ExperimentType =
   | 'http-error'
   | 'time-skew';
 
-export type ExperimentStatus = 'pending' | 'running' | 'completed' | 'failed' | 'aborted';
+export type ExperimentStatus = 'pending' | 'scheduled' | 'running' | 'completed' | 'failed' | 'aborted';
 
 export interface ChaosExperiment {
   id: string;
@@ -33,6 +33,9 @@ export interface ChaosExperiment {
   description: string;
   type: ExperimentType;
   status: ExperimentStatus;
+  target?: string;
+  duration?: number;
+  progress?: number;
   createdAt: string;
   startedAt?: string;
   completedAt?: string;
@@ -127,8 +130,8 @@ export function useExperiment(experimentId: string) {
       return chaosApi<ChaosExperiment>(`/experiments/${experimentId}`);
     },
     enabled: !!experimentId,
-    refetchInterval: (data) =>
-      data?.status === 'running' ? 2000 : false, // Poll while running
+    refetchInterval: (query) =>
+      query.state.data?.status === 'running' ? 2000 : false, // Poll while running
   });
 }
 
@@ -234,3 +237,16 @@ export function useExperimentHistory(projectId: string, limit = 20) {
     enabled: !!projectId,
   });
 }
+
+export function useChaosResults(experimentId: string) {
+  return useQuery({
+    queryKey: ['chaos', 'results', experimentId],
+    queryFn: async () => {
+      const experiment = await chaosApi<ChaosExperiment>(`/experiments/${experimentId}`);
+      return experiment.results;
+    },
+    enabled: !!experimentId,
+  });
+}
+
+export const useStopExperiment = useAbortExperiment;
