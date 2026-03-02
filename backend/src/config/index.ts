@@ -37,6 +37,16 @@ const configSchema = z.object({
     expiresIn: z.string().default('7d'),
   }),
 
+  auth: z.object({
+    allowDevTokenBypass: z.coerce.boolean().default(false),
+    bootstrapAdminEmails: z.string().default('').transform((value) =>
+      value
+        .split(',')
+        .map((email) => email.trim().toLowerCase())
+        .filter(Boolean)
+    ),
+  }),
+
   github: z.object({
     clientId: z.string().optional(),
     clientSecret: z.string().optional(),
@@ -95,6 +105,11 @@ const rawConfig = {
   jwt: {
     secret: process.env.JWT_SECRET,
     expiresIn: process.env.JWT_EXPIRES_IN,
+  },
+
+  auth: {
+    allowDevTokenBypass: process.env.ALLOW_DEV_TOKEN_BYPASS,
+    bootstrapAdminEmails: process.env.BOOTSTRAP_ADMIN_EMAILS,
   },
 
   github: {

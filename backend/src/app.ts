@@ -13,8 +13,9 @@ import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 
 import { config } from '@/config/index.js';
-import { logger } from '@/lib/logger.js';
+import { prisma } from '@/lib/prisma.js';
 import { getRedisClient } from '@/lib/redis.js';
+import { createAuditLog } from '@/services/audit/index.js';
 
 // Routes
 import { healthRoutes } from '@/routes/health.js';
@@ -41,6 +42,7 @@ import { observabilityRoutes } from '@/routes/observability.js';
 import { chaosRoutes } from '@/routes/chaos.js';
 import { dbBranchingRoutes } from '@/routes/db-branching.js';
 import selfDeployRoutes from '@/routes/self-deploy.js';
+import { adminRoutes } from '@/routes/admin.js';
 
 // ===========================================
 // CREATE APPLICATION
@@ -169,16 +171,17 @@ export async function createApp(): Promise<FastifyInstance> {
     request: FastifyRequest,
     reply: FastifyReply
   ) {
-    // Dev mode bypass - skip auth for easier testing
-    if (config.env === 'development') {
+    // Explicitly opt-in development bypass for local smoke testing
+    if (config.env === 'development' && config.auth.allowDevTokenBypass) {
       const authHeader = request.headers.authorization;
       if (authHeader === 'Bearer dev-token') {
-        // Set a mock user for development (cast to any to add sub field)
-        (request as unknown as { user: { id: string; sub: string; email: string; name: string } }).user = {
+        (request as unknown as { user: { id: string; sub: string; email: string; name: string; role: 'ADMIN'; isActive: true } }).user = {
           id: 'dev-user-id',
           sub: 'dev-user-id',
           email: 'dev@zyphron.dev',
           name: 'Dev User',
+          role: 'ADMIN',
+          isActive: true,
         };
         return;
       }
@@ -186,16 +189,80 @@ export async function createApp(): Promise<FastifyInstance> {
 
     try {
       await request.jwtVerify();
-      // Map 'sub' to 'id' for consistent user access in routes
-      if (request.user && 'sub' in request.user) {
-        (request.user as unknown as { id: string }).id = (request.user as unknown as { sub: string }).sub;
+
+      const tokenUser = request.user as unknown as { sub?: string; id?: string };
+      const userId = tokenUser.sub || tokenUser.id;
+      if (!userId) {
+        return reply.status(401).send({
+          success: false,
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'Invalid authentication token',
+          },
+        });
       }
+
+      const currentUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          avatarUrl: true,
+          role: true,
+          isActive: true,
+        },
+      });
+
+      if (!currentUser) {
+        return reply.status(401).send({
+          success: false,
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'User no longer exists',
+          },
+        });
+      }
+
+      if (!currentUser.isActive) {
+        return reply.status(403).send({
+          success: false,
+          error: {
+            code: 'ACCOUNT_DISABLED',
+            message: 'Account is disabled',
+          },
+        });
+      }
+
+      request.user = {
+        id: currentUser.id,
+        email: currentUser.email,
+        name: currentUser.name ?? undefined,
+        avatarUrl: currentUser.avatarUrl ?? undefined,
+        role: currentUser.role,
+        isActive: currentUser.isActive,
+      };
     } catch (err) {
-      reply.status(401).send({
+      return reply.status(401).send({
         success: false,
         error: {
           code: 'UNAUTHORIZED',
           message: 'Invalid or expired token',
+        },
+      });
+    }
+  });
+
+  app.decorate('requireAdmin', async function (
+    request: FastifyRequest,
+    reply: FastifyReply
+  ) {
+    if (request.user?.role !== 'ADMIN') {
+      return reply.status(403).send({
+        success: false,
+        error: {
+          code: 'FORBIDDEN',
+          message: 'Admin access required',
         },
       });
     }
@@ -225,6 +292,27 @@ export async function createApp(): Promise<FastifyInstance> {
       statusCode: reply.statusCode,
       responseTime: reply.elapsedTime,
     }, 'Request completed');
+
+    const mutatingMethod = request.method === 'POST' || request.method === 'PUT' || request.method === 'PATCH' || request.method === 'DELETE';
+    const isApiRequest = request.url.startsWith('/api/v1/');
+    const isExternalWebhook = request.url.startsWith('/api/v1/webhooks/github/');
+
+    if (mutatingMethod && isApiRequest && !isExternalWebhook && request.user?.id) {
+      const routePath = request.routeOptions.url ?? request.url.split('?')[0];
+      void createAuditLog({
+        userId: request.user.id,
+        action: `http.${request.method.toLowerCase()}`,
+        resourceType: 'api',
+        resourceId: routePath,
+        metadata: {
+          statusCode: reply.statusCode,
+          method: request.method,
+          route: routePath,
+          requestId: request.id,
+        },
+        request,
+      });
+    }
   });
 
   // Error handler
@@ -273,8 +361,8 @@ export async function createApp(): Promise<FastifyInstance> {
   await app.register(projectRoutes, { prefix: '/api/v1/projects' });
   await app.register(deploymentRoutes, { prefix: '/api/v1' });  // Has /projects/:id/deployments and /deployments/:id routes
   await app.register(serviceRoutes, { prefix: '/api/v1' });  // Services under /api/v1/projects/:projectId/services
-  await app.register(envRoutes, { prefix: '/api/v1/projects' });
-  await app.register(databaseRoutes, { prefix: '/api/v1/databases' });
+  await app.register(envRoutes, { prefix: '/api/v1' });
+  await app.register(databaseRoutes, { prefix: '/api/v1' });
   await app.register(webhookRoutes, { prefix: '/api/v1' });  // Webhooks under /api/v1/projects/:projectId/webhooks and /api/v1/webhooks/github/:projectId
   await app.register(domainRoutes, { prefix: '/api/v1' });
   await app.register(metricsRoutes, { prefix: '/api/v1' });
@@ -288,6 +376,7 @@ export async function createApp(): Promise<FastifyInstance> {
   await app.register(chaosRoutes, { prefix: '/api/v1/chaos' });
   await app.register(dbBranchingRoutes, { prefix: '/api/v1' });
   await app.register(selfDeployRoutes, { prefix: '/api/v1/self-deploy' });
+  await app.register(adminRoutes, { prefix: '/api/v1/admin' });
   await app.register(websocketRoutes);
 
   return app;
@@ -300,5 +389,6 @@ export async function createApp(): Promise<FastifyInstance> {
 declare module 'fastify' {
   interface FastifyInstance {
     authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+    requireAdmin: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   }
 }
