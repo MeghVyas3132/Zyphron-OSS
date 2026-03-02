@@ -6,6 +6,7 @@
 import { createLogger } from '../../lib/logger.js';
 import { prisma } from '../../lib/prisma.js';
 import { getRedisClient } from '../../lib/redis.js';
+import { getGitHubToken } from '../../lib/github-token.js';
 
 const logger = createLogger('preview-service');
 
@@ -399,7 +400,7 @@ export class PreviewEnvironmentService {
 
       if (!project) return;
 
-      const token = await this.redis.get(`github:token:${project.userId}`);
+      const token = await getGitHubToken(project.userId);
       if (!token) return;
 
       // Parse repo info from URL
