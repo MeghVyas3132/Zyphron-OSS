@@ -227,7 +227,7 @@ export default function SelfDeployPage() {
             <div className="flex gap-2">
               <input
                 type="text"
-                placeholder={version?.latest || 'e.g., v1.2.3'}
+                placeholder={version || 'e.g., v1.2.3'}
                 value={targetVersion}
                 onChange={(e) => setTargetVersion(e.target.value)}
                 className="flex-1 px-3 py-2 border rounded-lg bg-background"
@@ -349,7 +349,7 @@ export default function SelfDeployPage() {
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="font-medium">
-                          {deployment.fromVersion} → {deployment.toVersion}
+                          {deployment.fromVersion || deployment.previousVersion || deployment.version} → {deployment.toVersion || deployment.version}
                         </span>
                         <span className={`px-2 py-0.5 rounded text-xs ${
                           deployment.strategy === 'rolling' ? 'bg-blue-500/20 text-blue-500' :
@@ -361,7 +361,12 @@ export default function SelfDeployPage() {
                       </div>
                       <div className="flex items-center gap-4 text-sm text-muted-foreground mt-1">
                         <span>ID: {deployment.id.slice(0, 8)}</span>
-                        <span>Components: {deployment.components?.join(', ') || 'all'}</span>
+                        <span>
+                          Components:{' '}
+                          {Array.isArray(deployment.components)
+                            ? deployment.components.join(', ')
+                            : Object.keys(deployment.components || {}).join(', ') || 'all'}
+                        </span>
                         <span>{new Date(deployment.startedAt).toLocaleString()}</span>
                       </div>
                     </div>
@@ -392,7 +397,7 @@ export default function SelfDeployPage() {
                 {deployment.status === 'in-progress' && deployment.progress && (
                   <div className="mt-4 pt-4 border-t">
                     <div className="flex items-center justify-between text-sm mb-2">
-                      <span className="text-muted-foreground">{deployment.progress.phase}</span>
+                      <span className="text-muted-foreground">{deployment.progress.phase || deployment.progress.currentPhase || 'Deploying'}</span>
                       <span>{deployment.progress.percentage}%</span>
                     </div>
                     <div className="h-2 bg-muted rounded-full overflow-hidden">
