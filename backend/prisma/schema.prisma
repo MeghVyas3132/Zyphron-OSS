@@ -21,6 +21,8 @@ model User {
   email         String    @unique
   name          String?
   password      String?   // For email/password auth
+  role          UserRole  @default(USER)
+  isActive      Boolean   @default(true) @map("is_active")
   avatarUrl     String?   @map("avatar_url")
   githubId      String?   @unique @map("github_id")
   gitlabId      String?   @unique @map("gitlab_id")
@@ -33,12 +35,18 @@ model User {
   
   // Relations
   projects      Project[]
+  deployments   Deployment[]
   teamMembers   TeamMember[]
   ownedTeams    Team[]    @relation("TeamOwner")
   apiKeys       ApiKey[]
   auditLogs     AuditLog[]
   
   @@map("users")
+}
+
+enum UserRole {
+  ADMIN
+  USER
 }
 
 model ApiKey {
@@ -360,10 +368,12 @@ model Deployment {
   
   // Relations
   project       Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user          User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
   buildJob      BuildJob?
   serviceDeployments ServiceDeployment[]
   
   @@index([projectId, status])
+  @@index([userId, status])
   @@index([createdAt])
   @@map("deployments")
 }
