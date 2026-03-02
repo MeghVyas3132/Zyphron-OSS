@@ -41,7 +41,7 @@ export default function ChaosPage() {
   
   const { data: experiments, isLoading, refetch } = useChaosExperiments(selectedProjectId);
   const createMutation = useCreateExperiment();
-  const runMutation = useRunExperiment('');
+  const runMutation = useRunExperiment();
 
   if (isLoading) {
     return (
