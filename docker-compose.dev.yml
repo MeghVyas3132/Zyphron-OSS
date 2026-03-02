@@ -12,8 +12,8 @@ services:
       - "3004:3000"
     environment:
       - NODE_ENV=development
-      - NEXT_PUBLIC_API_URL=http://api.localhost
-      - NEXT_PUBLIC_APP_URL=http://app.localhost
+      - NEXT_PUBLIC_API_URL=http://localhost:3003
+      - NEXT_PUBLIC_APP_URL=http://localhost:3004
     volumes:
       - frontend_node_modules:/app/node_modules
       - frontend_next:/app/.next
