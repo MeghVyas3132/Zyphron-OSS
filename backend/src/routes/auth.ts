@@ -8,7 +8,8 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '@/lib/prisma.js';
 import { createLogger } from '@/lib/logger.js';
 import { config } from '@/config/index.js';
-import { storeGitHubToken } from './github.js';
+import { storeGitHubToken } from '@/lib/github-token.js';
+import { createAuditLog } from '@/services/audit/index.js';
 
 const logger = createLogger('auth');
 
@@ -32,11 +33,18 @@ const githubCallbackSchema = z.object({
   state: z.string().optional(),
 });
 
+const updateProfileSchema = z.object({
+  name: z.string().min(2).max(100).optional(),
+  email: z.string().email().optional(),
+});
+
 // ===========================================
 // ROUTES
 // ===========================================
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
+  const isBootstrapAdminEmail = (email: string): boolean =>
+    config.auth.bootstrapAdminEmails.includes(email.toLowerCase());
   
   // ===========================================
   // EMAIL/PASSWORD AUTHENTICATION
@@ -84,6 +92,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
           email,
           name,
           password: hashedPassword,
+          role: isBootstrapAdminEmail(email) ? 'ADMIN' : 'USER',
           lastLoginAt: new Date(),
         },
       });
@@ -92,8 +101,18 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       const token = app.jwt.sign({
         sub: user.id,
         email: user.email,
+        role: user.role,
         iat: Math.floor(Date.now() / 1000),
         exp: Math.floor(Date.now() / 1000) + (60 * 60 * 24 * 7), // 7 days
+      });
+
+      await createAuditLog({
+        userId: user.id,
+        action: 'user.register',
+        resourceType: 'user',
+        resourceId: user.id,
+        metadata: { email: user.email, role: user.role },
+        request,
       });
 
       logger.info({ userId: user.id, email }, 'New user registered');
@@ -107,6 +126,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
             email: user.email,
             name: user.name,
             avatarUrl: user.avatarUrl,
+            role: user.role,
+            isActive: user.isActive,
           },
         },
       });
@@ -168,6 +189,16 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         });
       }
 
+      if (!user.isActive) {
+        return reply.status(403).send({
+          success: false,
+          error: {
+            code: 'ACCOUNT_DISABLED',
+            message: 'Account is disabled',
+          },
+        });
+      }
+
       // Update last login
       await prisma.user.update({
         where: { id: user.id },
@@ -178,8 +209,18 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       const token = app.jwt.sign({
         sub: user.id,
         email: user.email,
+        role: user.role,
         iat: Math.floor(Date.now() / 1000),
         exp: Math.floor(Date.now() / 1000) + (60 * 60 * 24 * 7), // 7 days
+      });
+
+      await createAuditLog({
+        userId: user.id,
+        action: 'user.login',
+        resourceType: 'user',
+        resourceId: user.id,
+        metadata: { email: user.email, role: user.role },
+        request,
       });
 
       logger.info({ userId: user.id, email }, 'User logged in');
@@ -193,6 +234,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
             email: user.email,
             name: user.name,
             avatarUrl: user.avatarUrl,
+            role: user.role,
+            isActive: user.isActive,
           },
         },
       });
@@ -342,6 +385,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
           data: {
             githubId: String(githubUser.id),
             avatarUrl: githubUser.avatar_url,
+            role: isBootstrapAdminEmail(email) ? 'ADMIN' : user.role,
             lastLoginAt: new Date(),
           },
         });
@@ -353,6 +397,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
             name: githubUser.name || githubUser.login,
             githubId: String(githubUser.id),
             avatarUrl: githubUser.avatar_url,
+            role: isBootstrapAdminEmail(email) ? 'ADMIN' : 'USER',
             lastLoginAt: new Date(),
           },
         });
@@ -362,12 +407,21 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       const token = app.jwt.sign({
         sub: user.id,
         email: user.email,
+        role: user.role,
         iat: Math.floor(Date.now() / 1000),
         exp: Math.floor(Date.now() / 1000) + (60 * 60 * 24 * 7), // 7 days
       });
 
       // Store GitHub access token for repo access
       await storeGitHubToken(user.id, tokenData.access_token);
+      await createAuditLog({
+        userId: user.id,
+        action: 'user.login',
+        resourceType: 'user',
+        resourceId: user.id,
+        metadata: { provider: 'github', role: user.role },
+        request,
+      });
 
       logger.info({ userId: user.id }, 'User authenticated via GitHub');
 
@@ -380,6 +434,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
             email: user.email,
             name: user.name,
             avatarUrl: user.avatarUrl,
+            role: user.role,
+            isActive: user.isActive,
           },
         },
       });
@@ -408,6 +464,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         email: true,
         name: true,
         avatarUrl: true,
+        role: true,
+        isActive: true,
         createdAt: true,
         lastLoginAt: true,
         _count: {
@@ -441,6 +499,92 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
+  // Update current user profile
+  app.put('/profile', {
+    onRequest: [app.authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const userId = request.user?.id as string;
+    const parseResult = updateProfileSchema.safeParse(request.body);
+
+    if (!parseResult.success) {
+      return reply.status(400).send({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid request body',
+          details: parseResult.error.flatten(),
+        },
+      });
+    }
+
+    const data = parseResult.data;
+    if (!data.name && !data.email) {
+      return reply.status(400).send({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'At least one field is required',
+        },
+      });
+    }
+
+    const nextEmail = data.email?.toLowerCase();
+
+    if (nextEmail) {
+      const conflict = await prisma.user.findFirst({
+        where: {
+          email: nextEmail,
+          id: { not: userId },
+        },
+        select: { id: true },
+      });
+
+      if (conflict) {
+        return reply.status(409).send({
+          success: false,
+          error: {
+            code: 'EMAIL_IN_USE',
+            message: 'This email is already in use',
+          },
+        });
+      }
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        ...(data.name !== undefined ? { name: data.name } : {}),
+        ...(nextEmail !== undefined ? { email: nextEmail } : {}),
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        avatarUrl: true,
+        role: true,
+        isActive: true,
+      },
+    });
+
+    await createAuditLog({
+      userId,
+      action: 'user.profile.update',
+      resourceType: 'user',
+      resourceId: userId,
+      metadata: {
+        updatedFields: Object.keys(data),
+      },
+      request,
+    });
+
+    return reply.send({
+      success: true,
+      data: {
+        user: updatedUser,
+      },
+    });
+  });
+
   // Refresh token
   app.post('/refresh', {
     onRequest: [app.authenticate],
@@ -451,6 +595,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const token = app.jwt.sign({
       sub: userId,
       email,
+      role: request.user?.role,
       iat: Math.floor(Date.now() / 1000),
       exp: Math.floor(Date.now() / 1000) + (60 * 60 * 24 * 7), // 7 days
     });
@@ -462,8 +607,17 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // Logout (invalidate token - handled client-side mostly)
-  app.post('/logout', async (_request: FastifyRequest, reply: FastifyReply) => {
-    // In a production system, you'd add the token to a blacklist in Redis
+  app.post('/logout', {
+    onRequest: [app.authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    await createAuditLog({
+      userId: request.user?.id,
+      action: 'user.logout',
+      resourceType: 'user',
+      resourceId: request.user?.id,
+      request,
+    });
+
     return reply.send({
       success: true,
       data: { message: 'Logged out successfully' },
