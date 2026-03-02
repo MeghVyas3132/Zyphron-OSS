@@ -15,9 +15,12 @@ import {
   XCircle,
   Clock,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { useMetrics, useTraces, useAlerts } from '@/hooks/use-observability';
+import { useMetrics, useTraces, useAlerts, useCreateAlert } from '@/hooks/use-observability';
+import { useProjects } from '@/hooks/use-projects';
+import type { Project } from '@/lib/api';
 
 type TraceRow = {
   id: string;
@@ -42,14 +45,25 @@ const fallbackTraces: TraceRow[] = [
 
 export default function ObservabilityPage() {
   const [timeRange, setTimeRange] = useState('1h');
-  const [selectedProjectId] = useState('default');
+  const [selectedProjectId, setSelectedProjectId] = useState('');
+  const { data: projectResponse } = useProjects({ page: 1, limit: 100 });
+  const createAlert = useCreateAlert();
+
+  const projectsPayload = projectResponse?.data as unknown;
+  const projects: Project[] = Array.isArray(projectsPayload)
+    ? projectsPayload
+    : projectsPayload && typeof projectsPayload === 'object' && 'projects' in projectsPayload
+      ? ((projectsPayload as { projects?: Project[] }).projects || [])
+      : [];
+
+  const effectiveProjectId = selectedProjectId || projects[0]?.id || '';
 
   const { isLoading: loadingMetrics, refetch } = useMetrics({
-    projectId: selectedProjectId,
+    projectId: effectiveProjectId,
     period: timeRange,
   });
-  const { data: traces } = useTraces({ projectId: selectedProjectId, limit: 10 });
-  const { data: alerts } = useAlerts(selectedProjectId);
+  const { data: traces } = useTraces({ projectId: effectiveProjectId, limit: 10 });
+  const { data: alerts } = useAlerts(effectiveProjectId);
 
   if (loadingMetrics) {
     return (
@@ -75,17 +89,31 @@ export default function ObservabilityPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <select
-            value={timeRange}
-            onChange={(e) => setTimeRange(e.target.value)}
-            className="px-3 py-2 border border-input rounded-xl bg-card text-sm"
-          >
-            <option value="15m">Last 15 minutes</option>
-            <option value="1h">Last hour</option>
-            <option value="6h">Last 6 hours</option>
-            <option value="24h">Last 24 hours</option>
-            <option value="7d">Last 7 days</option>
-          </select>
+          <div className="flex gap-2">
+            <select
+              value={effectiveProjectId}
+              onChange={(e) => setSelectedProjectId(e.target.value)}
+              className="px-3 py-2 border border-input rounded-xl bg-card text-sm min-w-[180px]"
+            >
+              {projects.length === 0 && <option value="">No projects</option>}
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={timeRange}
+              onChange={(e) => setTimeRange(e.target.value)}
+              className="px-3 py-2 border border-input rounded-xl bg-card text-sm"
+            >
+              <option value="15m">Last 15 minutes</option>
+              <option value="1h">Last hour</option>
+              <option value="6h">Last 6 hours</option>
+              <option value="24h">Last 24 hours</option>
+              <option value="7d">Last 7 days</option>
+            </select>
+          </div>
           <Button onClick={() => refetch()} variant="outline" size="icon">
             <RefreshCw className="h-4 w-4" />
           </Button>
@@ -103,7 +131,7 @@ export default function ObservabilityPage() {
         <div className="premium-panel p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold">Request Volume</h3>
-            <Button variant="ghost" size="sm">
+            <Button variant="ghost" size="sm" onClick={() => toast.info('Chart configuration is not exposed yet.')}>
               <Settings className="h-4 w-4" />
             </Button>
           </div>
@@ -115,7 +143,7 @@ export default function ObservabilityPage() {
         <div className="premium-panel p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold">Response Times</h3>
-            <Button variant="ghost" size="sm">
+            <Button variant="ghost" size="sm" onClick={() => toast.info('Chart configuration is not exposed yet.')}>
               <Settings className="h-4 w-4" />
             </Button>
           </div>
@@ -131,7 +159,33 @@ export default function ObservabilityPage() {
             <Bell className="h-5 w-5" />
             Alerts
           </h2>
-          <Button size="sm">
+          <Button
+            size="sm"
+            onClick={async () => {
+              if (!effectiveProjectId) {
+                toast.error('Select a project first.');
+                return;
+              }
+              try {
+                await createAlert.mutateAsync({
+                  projectId: effectiveProjectId,
+                  name: `Latency alert ${new Date().toISOString().slice(11, 19)}`,
+                  severity: 'warning',
+                  condition: {
+                    metric: 'latency',
+                    operator: '>',
+                    threshold: 1000,
+                    duration: 60,
+                    aggregation: 'p95',
+                  },
+                  channels: [{ type: 'in-app', config: {}, enabled: true }],
+                });
+                toast.success('Alert created.');
+              } catch (error) {
+                toast.error(error instanceof Error ? error.message : 'Failed to create alert.');
+              }
+            }}
+          >
             <Plus className="h-4 w-4 mr-1" />
             Create Alert
           </Button>
@@ -156,7 +210,11 @@ export default function ObservabilityPage() {
                 <span className="px-2 py-1 rounded text-xs font-medium bg-foreground/10 text-foreground/80">
                   {alert.severity}
                 </span>
-                <Button variant="ghost" size="sm">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => toast.info('Alert settings editor is not wired yet.')}
+                >
                   <Settings className="h-4 w-4" />
                 </Button>
               </div>
@@ -173,7 +231,7 @@ export default function ObservabilityPage() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input placeholder="Search traces..." className="pl-10 w-64 h-10 rounded-xl" />
             </div>
-            <Button variant="outline" size="icon">
+            <Button variant="outline" size="icon" onClick={() => toast.info('Trace filters are not wired yet.')}>
               <Filter className="h-4 w-4" />
             </Button>
           </div>

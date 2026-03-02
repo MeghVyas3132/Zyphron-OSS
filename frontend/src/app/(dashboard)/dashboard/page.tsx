@@ -194,7 +194,7 @@ export default function DashboardPage() {
               </p>
             </div>
           </Link>
-          <Link href="/databases/new">
+          <Link href="/databases?new=1">
             <div className="premium-panel premium-card-hover p-6 cursor-pointer">
               <Database className="h-8 w-8 text-foreground mb-4" />
               <h3 className="font-semibold">Create Database</h3>

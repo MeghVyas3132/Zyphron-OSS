@@ -195,7 +195,12 @@ export default function DashboardLayout({
                   New Project
                 </Button>
               </Link>
-              <Button variant="outline" size="icon" className="relative rounded-xl">
+              <Button
+                variant="outline"
+                size="icon"
+                className="relative rounded-xl"
+                onClick={() => router.push('/settings?tab=notifications')}
+              >
                 <Bell className="h-4 w-4" />
                 <span className="absolute -top-1 -right-1 size-4 rounded-full bg-foreground text-background text-[10px] flex items-center justify-center">
                   3

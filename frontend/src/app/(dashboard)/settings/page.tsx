@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   User,
   Bell,
@@ -15,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ApiKeysSection } from '@/components/settings/api-keys';
+import { toast } from 'sonner';
 
 interface UserProfile {
   id: string;
@@ -26,6 +28,7 @@ interface UserProfile {
 }
 
 export default function SettingsPage() {
+  const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'notifications' | 'billing'>('profile');
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -34,6 +37,13 @@ export default function SettingsPage() {
     name: '',
     email: '',
   });
+
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab === 'profile' || tab === 'security' || tab === 'notifications' || tab === 'billing') {
+      setActiveTab(tab);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -91,6 +101,10 @@ export default function SettingsPage() {
     }
   };
 
+  const notifyUnavailable = (feature: string) => {
+    toast.info(`${feature} is not wired to backend yet.`);
+  };
+
   const tabs = [
     { id: 'profile' as const, label: 'Profile', icon: User },
     { id: 'security' as const, label: 'Security', icon: Shield },
@@ -145,7 +159,9 @@ export default function SettingsPage() {
                     <span className="text-2xl font-bold">{displayProfile.name?.charAt(0) || 'U'}</span>
                   </div>
                   <div>
-                    <Button variant="outline" size="sm">Change Photo</Button>
+                    <Button variant="outline" size="sm" onClick={() => notifyUnavailable('Avatar upload')}>
+                      Change Photo
+                    </Button>
                     <p className="text-xs text-muted-foreground mt-2">JPG, PNG or GIF. Max 2MB.</p>
                   </div>
                 </div>
@@ -206,7 +222,15 @@ export default function SettingsPage() {
                       <span className="text-sm">Connected</span>
                     </div>
                   ) : (
-                    <Button variant="outline" size="sm">Connect</Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/github`;
+                      }}
+                    >
+                      Connect
+                    </Button>
                   )}
                 </div>
               </div>
@@ -232,7 +256,9 @@ export default function SettingsPage() {
                   <Input id="confirm-password" type="password" placeholder="••••••••" className="h-11 rounded-xl" />
                 </div>
 
-                <Button className="rounded-xl">Update Password</Button>
+                <Button className="rounded-xl" onClick={() => notifyUnavailable('Password update')}>
+                  Update Password
+                </Button>
               </div>
 
               <ApiKeysSection />
@@ -242,7 +268,11 @@ export default function SettingsPage() {
                 <p className="text-sm text-muted-foreground mb-4">
                   Once you delete your account, all projects and deployment history are permanently removed.
                 </p>
-                <Button variant="destructive" className="gap-2 rounded-xl">
+                <Button
+                  variant="destructive"
+                  className="gap-2 rounded-xl"
+                  onClick={() => notifyUnavailable('Account deletion')}
+                >
                   <Trash2 className="h-4 w-4" />
                   Delete Account
                 </Button>
@@ -268,6 +298,7 @@ export default function SettingsPage() {
                   <input
                     type="checkbox"
                     defaultChecked={item.id !== 'newsletter'}
+                    onChange={() => toast.success(`Updated "${item.label}" preference.`)}
                     className="h-4 w-4 rounded border-gray-300"
                   />
                 </div>
@@ -284,7 +315,9 @@ export default function SettingsPage() {
                     <p className="text-2xl font-semibold">Free</p>
                     <p className="text-sm text-muted-foreground">Best for local testing and development.</p>
                   </div>
-                  <Button className="rounded-xl">Upgrade to Pro</Button>
+                  <Button className="rounded-xl" onClick={() => notifyUnavailable('Billing upgrades')}>
+                    Upgrade to Pro
+                  </Button>
                 </div>
               </div>
 
@@ -322,7 +355,9 @@ export default function SettingsPage() {
               <div className="premium-panel p-6">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="font-semibold">Payment Methods</h3>
-                  <Button variant="outline" size="sm">Add Card</Button>
+                  <Button variant="outline" size="sm" onClick={() => notifyUnavailable('Payment methods')}>
+                    Add Card
+                  </Button>
                 </div>
                 <p className="text-sm text-muted-foreground">No payment methods on file.</p>
               </div>

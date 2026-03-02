@@ -3,6 +3,34 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { databasesApi, type DatabaseInstance, type CreateDatabaseInput } from '@/lib/api';
 
+type DatabaseListResponse =
+  | { success?: boolean; data?: DatabaseInstance[] }
+  | { success?: boolean; data?: { databases?: DatabaseInstance[] } };
+
+type DatabaseSingleResponse =
+  | { success?: boolean; data?: DatabaseInstance }
+  | { success?: boolean; data?: { database?: DatabaseInstance } };
+
+function extractDatabaseList(response: DatabaseListResponse): DatabaseInstance[] {
+  if (Array.isArray(response?.data)) {
+    return response.data;
+  }
+  if (response?.data && typeof response.data === 'object' && Array.isArray((response.data as { databases?: DatabaseInstance[] }).databases)) {
+    return (response.data as { databases: DatabaseInstance[] }).databases;
+  }
+  return [];
+}
+
+function extractDatabase(response: DatabaseSingleResponse): DatabaseInstance | null {
+  if (response?.data && !Array.isArray(response.data) && 'id' in response.data) {
+    return response.data as DatabaseInstance;
+  }
+  if (response?.data && typeof response.data === 'object' && 'database' in response.data) {
+    return ((response.data as { database?: DatabaseInstance }).database ?? null);
+  }
+  return null;
+}
+
 // Query keys
 export const databaseKeys = {
   all: ['databases'] as const,
@@ -17,15 +45,27 @@ export const databaseKeys = {
 export function useDatabases(params?: { page?: number; limit?: number }) {
   return useQuery({
     queryKey: databaseKeys.list(params),
-    queryFn: () => databasesApi.list(params),
+    queryFn: async () => {
+      const response = await databasesApi.list(params);
+      return {
+        success: true,
+        data: extractDatabaseList(response as DatabaseListResponse),
+      };
+    },
   });
 }
 
-export function useDatabase(slug: string) {
+export function useDatabase(databaseId: string) {
   return useQuery({
-    queryKey: databaseKeys.detail(slug),
-    queryFn: () => databasesApi.get(slug),
-    enabled: !!slug,
+    queryKey: databaseKeys.detail(databaseId),
+    queryFn: async () => {
+      const response = await databasesApi.get(databaseId);
+      return {
+        success: true,
+        data: extractDatabase(response as DatabaseSingleResponse),
+      };
+    },
+    enabled: !!databaseId,
   });
 }
 
@@ -44,17 +84,17 @@ export function useDeleteDatabase() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (slug: string) => databasesApi.delete(slug),
+    mutationFn: (databaseId: string) => databasesApi.delete(databaseId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: databaseKeys.lists() });
     },
   });
 }
 
-export function useDatabaseConnection(slug: string) {
+export function useDatabaseConnection(databaseId: string) {
   return useQuery({
-    queryKey: [...databaseKeys.detail(slug), 'connection'],
-    queryFn: () => databasesApi.getConnectionString(slug),
-    enabled: !!slug,
+    queryKey: [...databaseKeys.detail(databaseId), 'connection'],
+    queryFn: () => databasesApi.getConnectionString(databaseId),
+    enabled: !!databaseId,
   });
 }

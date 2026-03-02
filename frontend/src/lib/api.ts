@@ -206,8 +206,8 @@ export const databasesApi = {
   list: (params?: { page?: number; limit?: number }) =>
     request<PaginatedResponse<DatabaseInstance>>('/api/v1/databases', { params }),
 
-  get: (slug: string) =>
-    request<ApiResponse<DatabaseInstance>>(`/api/v1/databases/${slug}`),
+  get: (databaseId: string) =>
+    request<ApiResponse<DatabaseInstance>>(`/api/v1/databases/${databaseId}`),
 
   create: (data: CreateDatabaseInput) =>
     request<ApiResponse<DatabaseInstance>>('/api/v1/databases', {
@@ -215,13 +215,13 @@ export const databasesApi = {
       body: JSON.stringify(data),
     }),
 
-  delete: (slug: string) =>
-    request<ApiResponse<void>>(`/api/v1/databases/${slug}`, {
+  delete: (databaseId: string) =>
+    request<ApiResponse<void>>(`/api/v1/databases/${databaseId}`, {
       method: 'DELETE',
     }),
 
-  getConnectionString: (slug: string) =>
-    request<ApiResponse<{ connectionString: string }>>(`/api/v1/databases/${slug}/connection`),
+  getConnectionString: (databaseId: string) =>
+    request<ApiResponse<{ connectionString: string }>>(`/api/v1/databases/${databaseId}/connection`),
 };
 
 // Dashboard API
@@ -331,19 +331,22 @@ export interface EnvVar {
 export interface DatabaseInstance {
   id: string;
   name: string;
-  slug: string;
+  slug?: string;
   type: 'POSTGRESQL' | 'MYSQL' | 'MONGODB' | 'REDIS';
   version: string;
-  status: 'CREATING' | 'RUNNING' | 'STOPPED' | 'FAILED';
-  host: string;
-  port: number;
-  databaseName: string;
-  username: string;
+  status: 'CREATING' | 'RUNNING' | 'STOPPED' | 'FAILED' | 'PROVISIONING' | 'ACTIVE' | 'SUSPENDED' | 'DELETED' | 'ERROR';
+  host?: string | null;
+  port?: number | null;
+  databaseName?: string;
+  username?: string | null;
+  projectId?: string;
   createdAt: string;
-  storage: {
+  storage?: {
     used: number;
     total: number;
   };
+  storageGb?: number;
+  connectionString?: string | null;
 }
 
 export interface CreateDatabaseInput {
