@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma.js';
 import { createLogger } from '@/lib/logger.js';
 import { getRedisClient } from '@/lib/redis.js';
+import { projectWhereForUser } from '@/lib/project-access.js';
 import crypto from 'crypto';
 
 const logger = createLogger('domains');
@@ -56,13 +57,7 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
 
     // Check project access
     const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        OR: [
-          { userId },
-          { team: { members: { some: { userId } } } },
-        ],
-      },
+      where: projectWhereForUser(projectId, userId),
     });
 
     if (!project) {
@@ -76,7 +71,7 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Get domains from Redis (in production, use DB)
-    const domainsKey = `project:${projectId}:domains`;
+    const domainsKey = `project:${project.id}:domains`;
     const domainsJson = await redis.hgetall(domainsKey);
     
     const domains: DomainRecord[] = Object.values(domainsJson).map(d => JSON.parse(d as string));
@@ -114,13 +109,7 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
 
     // Check project access
     const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        OR: [
-          { userId },
-          { team: { members: { some: { userId, role: { in: ['OWNER', 'ADMIN'] } } } } },
-        ],
-      },
+      where: projectWhereForUser(projectId, userId, ['OWNER', 'ADMIN']),
     });
 
     if (!project) {
@@ -153,7 +142,7 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
     
     const domainRecord: DomainRecord = {
       id: crypto.randomUUID(),
-      projectId,
+      projectId: project.id,
       domain,
       verified: false,
       verificationToken,
@@ -164,10 +153,10 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
     };
 
     // Store in Redis
-    const domainsKey = `project:${projectId}:domains`;
+    const domainsKey = `project:${project.id}:domains`;
     await redis.hset(domainsKey, domain, JSON.stringify(domainRecord));
 
-    logger.info({ projectId, domain, userId }, 'Custom domain added');
+    logger.info({ projectId: project.id, domain, userId }, 'Custom domain added');
 
     return reply.status(201).send({
       success: true,
@@ -203,13 +192,7 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
 
     // Check project access
     const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        OR: [
-          { userId },
-          { team: { members: { some: { userId, role: { in: ['OWNER', 'ADMIN'] } } } } },
-        ],
-      },
+      where: projectWhereForUser(projectId, userId, ['OWNER', 'ADMIN']),
     });
 
     if (!project) {
@@ -223,7 +206,7 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Get domain record
-    const domainsKey = `project:${projectId}:domains`;
+    const domainsKey = `project:${project.id}:domains`;
     const domainJson = await redis.hget(domainsKey, domain);
 
     if (!domainJson) {
@@ -274,14 +257,14 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
 
     // Update project's custom domain
     await prisma.project.update({
-      where: { id: projectId },
+      where: { id: project.id },
       data: { customDomain: domain },
     });
 
     // Trigger SSL provisioning (in production, integrate with Let's Encrypt)
     await triggerSslProvisioning(domain, project.subdomain);
 
-    logger.info({ projectId, domain, userId }, 'Custom domain verified');
+    logger.info({ projectId: project.id, domain, userId }, 'Custom domain verified');
 
     return reply.send({
       success: true,
@@ -301,13 +284,7 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
 
     // Check project access
     const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        OR: [
-          { userId },
-          { team: { members: { some: { userId, role: { in: ['OWNER', 'ADMIN'] } } } } },
-        ],
-      },
+      where: projectWhereForUser(projectId, userId, ['OWNER', 'ADMIN']),
     });
 
     if (!project) {
@@ -321,18 +298,18 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Remove from Redis
-    const domainsKey = `project:${projectId}:domains`;
+    const domainsKey = `project:${project.id}:domains`;
     await redis.hdel(domainsKey, domain);
 
     // Clear custom domain if it was the primary
     if (project.customDomain === domain) {
       await prisma.project.update({
-        where: { id: projectId },
+        where: { id: project.id },
         data: { customDomain: null },
       });
     }
 
-    logger.info({ projectId, domain, userId }, 'Custom domain removed');
+    logger.info({ projectId: project.id, domain, userId }, 'Custom domain removed');
 
     return reply.send({
       success: true,
@@ -349,13 +326,7 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
 
     // Check project access
     const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        OR: [
-          { userId },
-          { team: { members: { some: { userId } } } },
-        ],
-      },
+      where: projectWhereForUser(projectId, userId),
     });
 
     if (!project) {
@@ -369,7 +340,7 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Get domain record
-    const domainsKey = `project:${projectId}:domains`;
+    const domainsKey = `project:${project.id}:domains`;
     const domainJson = await redis.hget(domainsKey, domain);
 
     if (!domainJson) {
@@ -405,13 +376,7 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
 
     // Check project access
     const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        OR: [
-          { userId },
-          { team: { members: { some: { userId, role: { in: ['OWNER', 'ADMIN'] } } } } },
-        ],
-      },
+      where: projectWhereForUser(projectId, userId, ['OWNER', 'ADMIN']),
     });
 
     if (!project) {
@@ -425,7 +390,7 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Get domain record
-    const domainsKey = `project:${projectId}:domains`;
+    const domainsKey = `project:${project.id}:domains`;
     const domainJson = await redis.hget(domainsKey, domain);
 
     if (!domainJson) {
@@ -452,11 +417,11 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
 
     // Update project's custom domain
     await prisma.project.update({
-      where: { id: projectId },
+      where: { id: project.id },
       data: { customDomain: domain },
     });
 
-    logger.info({ projectId, domain, userId }, 'Primary domain updated');
+    logger.info({ projectId: project.id, domain, userId }, 'Primary domain updated');
 
     return reply.send({
       success: true,

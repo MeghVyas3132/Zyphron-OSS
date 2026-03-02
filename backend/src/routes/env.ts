@@ -4,8 +4,10 @@
 
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
+import { Environment } from '@prisma/client';
 import { prisma } from '@/lib/prisma.js';
 import { createLogger } from '@/lib/logger.js';
+import { TEAM_ROLES_WRITE, projectWhereForUser } from '@/lib/project-access.js';
 import { randomBytes, createCipheriv, createDecipheriv } from 'crypto';
 
 const logger = createLogger('env');
@@ -75,6 +77,21 @@ const parseEnvFileSchema = z.object({
   environment: z.enum(['production', 'preview', 'staging', 'development']).default('production'),
 });
 
+type InputEnvironment = 'production' | 'preview' | 'staging' | 'development';
+
+function toPrismaEnvironment(environment: InputEnvironment): Environment {
+  switch (environment) {
+    case 'production':
+      return 'PRODUCTION';
+    case 'preview':
+      return 'PREVIEW';
+    case 'staging':
+      return 'STAGING';
+    case 'development':
+      return 'DEVELOPMENT';
+  }
+}
+
 // ===========================================
 // ROUTES
 // ===========================================
@@ -89,13 +106,7 @@ export async function envRoutes(app: FastifyInstance): Promise<void> {
 
     // Check project access
     const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        OR: [
-          { userId },
-          { team: { members: { some: { userId } } } },
-        ],
-      },
+      where: projectWhereForUser(projectId, userId),
     });
 
     if (!project) {
@@ -109,7 +120,7 @@ export async function envRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const envVariables = await prisma.envVariable.findMany({
-      where: { projectId },
+      where: { projectId: project.id },
       select: {
         id: true,
         key: true,
@@ -158,16 +169,11 @@ export async function envRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const data = parseResult.data;
+    const prismaEnvironment = toPrismaEnvironment(data.environment);
 
     // Check project access
     const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        OR: [
-          { userId },
-          { team: { members: { some: { userId, role: { in: ['OWNER', 'ADMIN', 'DEVELOPER'] } } } } },
-        ],
-      },
+      where: projectWhereForUser(projectId, userId, ['OWNER', 'ADMIN', 'DEVELOPER']),
     });
 
     if (!project) {
@@ -183,9 +189,9 @@ export async function envRoutes(app: FastifyInstance): Promise<void> {
     // Check for duplicate key in same environment
     const existing = await prisma.envVariable.findFirst({
       where: {
-        projectId,
+        projectId: project.id,
         key: data.key,
-        environment: data.environment,
+        environment: prismaEnvironment,
       },
     });
 
@@ -201,15 +207,15 @@ export async function envRoutes(app: FastifyInstance): Promise<void> {
 
     const envVariable = await prisma.envVariable.create({
       data: {
-        projectId,
+        projectId: project.id,
         key: data.key,
         value: encrypt(data.value),
-        environment: data.environment,
+        environment: prismaEnvironment,
         isSecret: data.isSecret,
       },
     });
 
-    logger.info({ projectId, key: data.key, environment: data.environment, userId }, 'Environment variable created');
+    logger.info({ projectId, key: data.key, environment: prismaEnvironment, userId }, 'Environment variable created');
 
     return reply.status(201).send({
       success: true,
@@ -251,13 +257,7 @@ export async function envRoutes(app: FastifyInstance): Promise<void> {
 
     // Check project access
     const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        OR: [
-          { userId },
-          { team: { members: { some: { userId, role: { in: ['OWNER', 'ADMIN'] } } } } },
-        ],
-      },
+      where: projectWhereForUser(projectId, userId, ['OWNER', 'ADMIN']),
     });
 
     if (!project) {
@@ -277,11 +277,12 @@ export async function envRoutes(app: FastifyInstance): Promise<void> {
     };
 
     for (const variable of variables) {
+      const prismaEnvironment = toPrismaEnvironment(variable.environment);
       const existing = await prisma.envVariable.findFirst({
         where: {
-          projectId,
+          projectId: project.id,
           key: variable.key,
-          environment: variable.environment,
+          environment: prismaEnvironment,
         },
       });
 
@@ -291,6 +292,7 @@ export async function envRoutes(app: FastifyInstance): Promise<void> {
             where: { id: existing.id },
             data: {
               value: encrypt(variable.value),
+              environment: prismaEnvironment,
               isSecret: variable.isSecret,
             },
           });
@@ -301,10 +303,10 @@ export async function envRoutes(app: FastifyInstance): Promise<void> {
       } else {
         await prisma.envVariable.create({
           data: {
-            projectId,
+            projectId: project.id,
             key: variable.key,
             value: encrypt(variable.value),
-            environment: variable.environment,
+            environment: prismaEnvironment,
             isSecret: variable.isSecret,
           },
         });
@@ -312,7 +314,7 @@ export async function envRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
-    logger.info({ projectId, userId, ...results }, 'Bulk environment variables operation');
+    logger.info({ projectId: project.id, userId, ...results }, 'Bulk environment variables operation');
 
     return reply.send({
       success: true,
@@ -324,6 +326,8 @@ export async function envRoutes(app: FastifyInstance): Promise<void> {
   app.post('/projects/:projectId/env/parse', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { projectId: string } }>, reply: FastifyReply) => {
+    const userId = request.user?.id as string;
+    const { projectId } = request.params;
     const parseResult = parseEnvFileSchema.safeParse(request.body);
 
     if (!parseResult.success) {
@@ -333,6 +337,21 @@ export async function envRoutes(app: FastifyInstance): Promise<void> {
           code: 'VALIDATION_ERROR',
           message: 'Invalid request body',
           details: parseResult.error.flatten(),
+        },
+      });
+    }
+
+    const project = await prisma.project.findFirst({
+      where: projectWhereForUser(projectId, userId, TEAM_ROLES_WRITE),
+      select: { id: true },
+    });
+
+    if (!project) {
+      return reply.status(404).send({
+        success: false,
+        error: {
+          code: 'PROJECT_NOT_FOUND',
+          message: 'Project not found or you do not have permission',
         },
       });
     }
@@ -404,13 +423,7 @@ export async function envRoutes(app: FastifyInstance): Promise<void> {
 
     // Check project access
     const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        OR: [
-          { userId },
-          { team: { members: { some: { userId, role: { in: ['OWNER', 'ADMIN', 'DEVELOPER'] } } } } },
-        ],
-      },
+      where: projectWhereForUser(projectId, userId, ['OWNER', 'ADMIN', 'DEVELOPER']),
     });
 
     if (!project) {
@@ -426,7 +439,7 @@ export async function envRoutes(app: FastifyInstance): Promise<void> {
     const existing = await prisma.envVariable.findFirst({
       where: {
         id: envId,
-        projectId,
+        projectId: project.id,
       },
     });
 
@@ -444,12 +457,12 @@ export async function envRoutes(app: FastifyInstance): Promise<void> {
       where: { id: envId },
       data: {
         ...(data.value !== undefined && { value: encrypt(data.value) }),
-        ...(data.environment !== undefined && { environment: data.environment }),
+        ...(data.environment !== undefined && { environment: toPrismaEnvironment(data.environment) }),
         ...(data.isSecret !== undefined && { isSecret: data.isSecret }),
       },
     });
 
-    logger.info({ projectId, envId, key: existing.key, userId }, 'Environment variable updated');
+    logger.info({ projectId: project.id, envId, key: existing.key, userId }, 'Environment variable updated');
 
     return reply.send({
       success: true,
@@ -476,13 +489,7 @@ export async function envRoutes(app: FastifyInstance): Promise<void> {
 
     // Check project access
     const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        OR: [
-          { userId },
-          { team: { members: { some: { userId, role: { in: ['OWNER', 'ADMIN', 'DEVELOPER'] } } } } },
-        ],
-      },
+      where: projectWhereForUser(projectId, userId, ['OWNER', 'ADMIN', 'DEVELOPER']),
     });
 
     if (!project) {
@@ -498,7 +505,7 @@ export async function envRoutes(app: FastifyInstance): Promise<void> {
     const existing = await prisma.envVariable.findFirst({
       where: {
         id: envId,
-        projectId,
+        projectId: project.id,
       },
     });
 
@@ -516,7 +523,7 @@ export async function envRoutes(app: FastifyInstance): Promise<void> {
       where: { id: envId },
     });
 
-    logger.info({ projectId, envId, key: existing.key, userId }, 'Environment variable deleted');
+    logger.info({ projectId: project.id, envId, key: existing.key, userId }, 'Environment variable deleted');
 
     return reply.send({
       success: true,
@@ -531,16 +538,11 @@ export async function envRoutes(app: FastifyInstance): Promise<void> {
     const userId = request.user?.id as string;
     const { projectId } = request.params;
     const { environment } = request.query as { environment?: string };
+    const prismaEnvironment = environment ? toPrismaEnvironment(environment as InputEnvironment) : undefined;
 
     // Check project access
     const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        OR: [
-          { userId },
-          { team: { members: { some: { userId, role: { in: ['OWNER', 'ADMIN'] } } } } },
-        ],
-      },
+      where: projectWhereForUser(projectId, userId, ['OWNER', 'ADMIN']),
     });
 
     if (!project) {
@@ -555,8 +557,8 @@ export async function envRoutes(app: FastifyInstance): Promise<void> {
 
     const envVariables = await prisma.envVariable.findMany({
       where: {
-        projectId,
-        ...(environment && { environment }),
+        projectId: project.id,
+        ...(prismaEnvironment && { environment: prismaEnvironment }),
       },
       orderBy: { key: 'asc' },
     });
