@@ -1,9 +1,12 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
+import type { TeamRole } from '@prisma/client';
 import { prisma } from '@/lib/prisma.js';
 import { createLogger } from '@/lib/logger.js';
-import { getRedisClient, publishEvent } from '@/lib/redis.js';
+import { publishEvent } from '@/lib/redis.js';
 import { sendDeploymentEvent } from '@/lib/kafka.js';
+import { createAuditLog } from '@/services/audit/index.js';
+import { TEAM_ROLES_WRITE, projectAccessFilter, projectWhereForUser } from '@/lib/project-access.js';
 
 const logger = createLogger('deployments');
 
@@ -27,8 +30,6 @@ const rollbackSchema = z.object({
 });
 
 export async function deploymentRoutes(app: FastifyInstance): Promise<void> {
-  const redis = getRedisClient();
-
   app.get('/projects/:projectId/deployments', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { projectId: string } }>, reply: FastifyReply) => {
@@ -37,7 +38,7 @@ export async function deploymentRoutes(app: FastifyInstance): Promise<void> {
     const query = deploymentQuerySchema.parse(request.query);
 
     const project = await prisma.project.findFirst({
-      where: { id: projectId, userId },
+      where: projectWhereForUser(projectId, userId),
     });
 
     if (!project) {
@@ -45,7 +46,7 @@ export async function deploymentRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const skip = (query.page - 1) * query.limit;
-    const where: Record<string, unknown> = { projectId };
+    const where: Record<string, unknown> = { projectId: project.id };
     if (query.status) where.status = query.status;
     if (query.environment) where.environment = query.environment;
 
@@ -77,7 +78,7 @@ export async function deploymentRoutes(app: FastifyInstance): Promise<void> {
     const body = triggerDeploymentSchema.parse(request.body);
 
     const project = await prisma.project.findFirst({
-      where: { id: projectId, userId },
+      where: projectWhereForUser(projectId, userId, TEAM_ROLES_WRITE),
       include: { services: true, envVariables: true },
     });
 
@@ -87,7 +88,7 @@ export async function deploymentRoutes(app: FastifyInstance): Promise<void> {
 
     if (!body.force) {
       const active = await prisma.deployment.findFirst({
-        where: { projectId, status: { in: ['QUEUED', 'BUILDING', 'DEPLOYING'] } },
+        where: { projectId: project.id, status: { in: ['QUEUED', 'BUILDING', 'DEPLOYING'] } },
       });
       if (active) {
         return reply.status(409).send({ error: 'Active deployment in progress', deploymentId: active.id });
@@ -96,7 +97,7 @@ export async function deploymentRoutes(app: FastifyInstance): Promise<void> {
 
     const deployment = await prisma.deployment.create({
       data: {
-        projectId,
+        projectId: project.id,
         userId,
         status: 'QUEUED',
         environment: body.environment,
@@ -127,7 +128,7 @@ export async function deploymentRoutes(app: FastifyInstance): Promise<void> {
     try {
       await sendDeploymentEvent(deployment.id, 'DEPLOYMENT_CREATED', {
         deploymentId: deployment.id,
-        projectId,
+        projectId: project.id,
         userId,
         environment: body.environment,
         branch: body.branch || project.branch || 'main',
@@ -139,14 +140,13 @@ export async function deploymentRoutes(app: FastifyInstance): Promise<void> {
 
     await publishEvent('deployment:created', { deploymentId: deployment.id, status: 'QUEUED' });
 
-    await prisma.auditLog.create({
-      data: {
-        userId,
-        action: 'DEPLOYMENT_TRIGGERED',
-        resourceType: 'Deployment',
-        resourceId: deployment.id,
-        metadata: { projectId, environment: body.environment },
-      },
+    await createAuditLog({
+      userId,
+      action: 'deployment.trigger',
+      resourceType: 'deployment',
+      resourceId: deployment.id,
+      metadata: { projectId: project.id, environment: body.environment },
+      request,
     });
 
     const full = await prisma.deployment.findUnique({
@@ -158,19 +158,23 @@ export async function deploymentRoutes(app: FastifyInstance): Promise<void> {
     return reply.status(201).send({ deployment: full });
   });
 
+  const getDeploymentForUser = async (deploymentId: string, userId: string, teamRoles?: TeamRole[]) => prisma.deployment.findFirst({
+    where: {
+      id: deploymentId,
+      project: projectAccessFilter(userId, teamRoles),
+    },
+    include: { project: true, buildJob: true, serviceDeployments: { include: { service: true } } },
+  });
+
   app.get('/deployments/:id', {
     onRequest: [app.authenticate],
   }, async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     const userId = request.user?.id as string;
     const { id } = request.params;
 
-    const deployment = await prisma.deployment.findFirst({
-      where: { id },
-      include: { project: true, buildJob: true, serviceDeployments: { include: { service: true } } },
-    });
+    const deployment = await getDeploymentForUser(id, userId);
 
     if (!deployment) return reply.status(404).send({ error: 'Deployment not found' });
-    if (deployment.project.userId !== userId) return reply.status(403).send({ error: 'Forbidden' });
 
     return reply.send({ deployment });
   });
@@ -181,13 +185,9 @@ export async function deploymentRoutes(app: FastifyInstance): Promise<void> {
     const userId = request.user?.id as string;
     const { id } = request.params;
 
-    const deployment = await prisma.deployment.findFirst({
-      where: { id },
-      include: { project: true },
-    });
+    const deployment = await getDeploymentForUser(id, userId, TEAM_ROLES_WRITE);
 
     if (!deployment) return reply.status(404).send({ error: 'Deployment not found' });
-    if (deployment.project.userId !== userId) return reply.status(403).send({ error: 'Forbidden' });
     if (!['QUEUED', 'BUILDING', 'DEPLOYING'].includes(deployment.status)) {
       return reply.status(400).send({ error: 'Cannot cancel', reason: deployment.status });
     }
@@ -202,7 +202,28 @@ export async function deploymentRoutes(app: FastifyInstance): Promise<void> {
       await prisma.buildJob.update({ where: { id: updated.buildJob.id }, data: { status: 'CANCELLED' } });
     }
 
+    try {
+      await sendDeploymentEvent(id, 'DEPLOYMENT_CANCELLED', {
+        deploymentId: id,
+        projectId: deployment.projectId,
+        userId,
+        reason: 'Cancelled by user',
+      });
+    } catch (err) {
+      logger.warn({ deploymentId: id, error: err }, 'Failed to send cancellation Kafka event');
+    }
+
     await publishEvent('deployment:cancelled', { deploymentId: id });
+
+    await createAuditLog({
+      userId,
+      action: 'deployment.cancel',
+      resourceType: 'deployment',
+      resourceId: id,
+      metadata: { projectId: deployment.projectId },
+      request,
+    });
+
     logger.info('Deployment cancelled', { deploymentId: id });
     return reply.send({ deployment: updated });
   });
@@ -214,14 +235,14 @@ export async function deploymentRoutes(app: FastifyInstance): Promise<void> {
     const { id } = request.params;
     const body = rollbackSchema.parse(request.body);
 
-    const current = await prisma.deployment.findFirst({ where: { id }, include: { project: true } });
+    const current = await getDeploymentForUser(id, userId, TEAM_ROLES_WRITE);
     if (!current) return reply.status(404).send({ error: 'Deployment not found' });
-    if (current.project.userId !== userId) return reply.status(403).send({ error: 'Forbidden' });
 
     const target = await prisma.deployment.findFirst({
       where: { id: body.targetDeploymentId, projectId: current.projectId, status: 'LIVE' },
     });
     if (!target) return reply.status(404).send({ error: 'Target deployment not found' });
+    if (!target.imageTag) return reply.status(400).send({ error: 'Target deployment has no image to rollback to' });
 
     await prisma.deployment.update({ where: { id }, data: { status: 'ROLLING_BACK' } });
 
@@ -239,7 +260,23 @@ export async function deploymentRoutes(app: FastifyInstance): Promise<void> {
     });
 
     await prisma.buildJob.create({ data: { deploymentId: rollback.id, status: 'PENDING' } });
-    await sendDeploymentEvent(rollback.id, 'DEPLOYMENT_CREATED', { isRollback: true });
+    await sendDeploymentEvent(rollback.id, 'DEPLOYMENT_ROLLBACK', {
+      deploymentId: rollback.id,
+      projectId: current.projectId,
+      imageTag: target.imageTag,
+      sourceDeploymentId: id,
+      targetDeploymentId: body.targetDeploymentId,
+    });
+
+    await createAuditLog({
+      userId,
+      action: 'deployment.rollback',
+      resourceType: 'deployment',
+      resourceId: rollback.id,
+      metadata: { sourceDeploymentId: id, targetDeploymentId: body.targetDeploymentId },
+      request,
+    });
+
     logger.info('Rollback initiated', { from: id, to: body.targetDeploymentId });
     return reply.status(201).send({ deployment: rollback });
   });
@@ -251,11 +288,13 @@ export async function deploymentRoutes(app: FastifyInstance): Promise<void> {
     const { id } = request.params;
 
     const source = await prisma.deployment.findFirst({
-      where: { id },
+      where: {
+        id,
+        project: projectAccessFilter(userId, TEAM_ROLES_WRITE),
+      },
       include: { project: { include: { services: true } } },
     });
     if (!source) return reply.status(404).send({ error: 'Deployment not found' });
-    if (source.project.userId !== userId) return reply.status(403).send({ error: 'Forbidden' });
 
     const newDep = await prisma.deployment.create({
       data: {
@@ -270,7 +309,26 @@ export async function deploymentRoutes(app: FastifyInstance): Promise<void> {
     });
 
     await prisma.buildJob.create({ data: { deploymentId: newDep.id, status: 'PENDING' } });
-    await sendDeploymentEvent(newDep.id, 'DEPLOYMENT_CREATED', { redeployFrom: id });
+    await sendDeploymentEvent(newDep.id, 'DEPLOYMENT_CREATED', {
+      deploymentId: newDep.id,
+      projectId: source.projectId,
+      userId,
+      environment: source.environment,
+      branch: source.branch,
+      commitSha: source.commitSha,
+      repositoryUrl: source.project.repositoryUrl,
+      redeployFrom: id,
+    });
+
+    await createAuditLog({
+      userId,
+      action: 'deployment.trigger',
+      resourceType: 'deployment',
+      resourceId: newDep.id,
+      metadata: { redeployFrom: id, projectId: source.projectId },
+      request,
+    });
+
     logger.info('Redeploy triggered', { from: id, new: newDep.id });
     return reply.status(201).send({ deployment: newDep });
   });
@@ -282,11 +340,129 @@ export async function deploymentRoutes(app: FastifyInstance): Promise<void> {
     const { id } = request.params;
 
     const deployment = await prisma.deployment.findFirst({
-      where: { id },
+      where: {
+        id,
+        project: {
+          OR: [
+            { userId },
+            { team: { members: { some: { userId } } } },
+          ],
+        },
+      },
       include: { project: true },
     });
     if (!deployment) return reply.status(404).send({ error: 'Deployment not found' });
-    if (deployment.project.userId !== userId) return reply.status(403).send({ error: 'Forbidden' });
+
+    const buildLogs = deployment.buildLogs ? deployment.buildLogs.split('\n') : [];
+    return reply.send({ logs: { build: buildLogs } });
+  });
+
+  app.get('/projects/:projectId/deployments/:id', {
+    onRequest: [app.authenticate],
+  }, async (request: FastifyRequest<{ Params: { projectId: string; id: string } }>, reply: FastifyReply) => {
+    const userId = request.user?.id as string;
+    const { projectId, id } = request.params;
+
+    const project = await prisma.project.findFirst({
+      where: projectWhereForUser(projectId, userId),
+      select: { id: true },
+    });
+    if (!project) return reply.status(404).send({ error: 'Project not found' });
+
+    const deployment = await getDeploymentForUser(id, userId);
+    if (!deployment || deployment.projectId !== project.id) {
+      return reply.status(404).send({ error: 'Deployment not found' });
+    }
+
+    return reply.send({ deployment });
+  });
+
+  app.post('/projects/:projectId/deployments/:id/cancel', {
+    onRequest: [app.authenticate],
+  }, async (request: FastifyRequest<{ Params: { projectId: string; id: string } }>, reply: FastifyReply) => {
+    const userId = request.user?.id as string;
+    const { projectId, id } = request.params;
+
+    const project = await prisma.project.findFirst({
+      where: projectWhereForUser(projectId, userId),
+      select: { id: true },
+    });
+    if (!project) return reply.status(404).send({ error: 'Project not found' });
+
+    const deployment = await prisma.deployment.findFirst({
+      where: {
+        id,
+        projectId: project.id,
+        project: projectAccessFilter(userId, TEAM_ROLES_WRITE),
+      },
+      include: { project: true },
+    });
+    if (!deployment) return reply.status(404).send({ error: 'Deployment not found' });
+    if (!['QUEUED', 'BUILDING', 'DEPLOYING'].includes(deployment.status)) {
+      return reply.status(400).send({ error: 'Cannot cancel', reason: deployment.status });
+    }
+
+    const updated = await prisma.deployment.update({
+      where: { id },
+      data: { status: 'CANCELLED', completedAt: new Date() },
+      include: { buildJob: true },
+    });
+
+    if (updated.buildJob) {
+      await prisma.buildJob.update({ where: { id: updated.buildJob.id }, data: { status: 'CANCELLED' } });
+    }
+
+    try {
+      await sendDeploymentEvent(id, 'DEPLOYMENT_CANCELLED', {
+        deploymentId: id,
+        projectId: deployment.projectId,
+        userId,
+        reason: 'Cancelled by user',
+      });
+    } catch (err) {
+      logger.warn({ deploymentId: id, error: err }, 'Failed to send cancellation Kafka event');
+    }
+
+    await publishEvent('deployment:cancelled', { deploymentId: id });
+
+    await createAuditLog({
+      userId,
+      action: 'deployment.cancel',
+      resourceType: 'deployment',
+      resourceId: id,
+      metadata: { projectId: deployment.projectId },
+      request,
+    });
+
+    return reply.send({ deployment: updated });
+  });
+
+  app.get('/projects/:projectId/deployments/:id/logs', {
+    onRequest: [app.authenticate],
+  }, async (request: FastifyRequest<{ Params: { projectId: string; id: string } }>, reply: FastifyReply) => {
+    const userId = request.user?.id as string;
+    const { projectId, id } = request.params;
+
+    const project = await prisma.project.findFirst({
+      where: projectWhereForUser(projectId, userId),
+      select: { id: true },
+    });
+    if (!project) return reply.status(404).send({ error: 'Project not found' });
+
+    const deployment = await prisma.deployment.findFirst({
+      where: {
+        id,
+        projectId: project.id,
+        project: {
+          OR: [
+            { userId },
+            { team: { members: { some: { userId } } } },
+          ],
+        },
+      },
+      include: { project: true },
+    });
+    if (!deployment) return reply.status(404).send({ error: 'Deployment not found' });
 
     const buildLogs = deployment.buildLogs ? deployment.buildLogs.split('\n') : [];
     return reply.send({ logs: { build: buildLogs } });
