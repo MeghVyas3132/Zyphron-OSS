@@ -13,18 +13,18 @@ import type { DatabaseInstance } from '@/lib/api';
 type StatusKey = 'CREATING' | 'RUNNING' | 'STOPPED' | 'FAILED';
 
 const dbTypeConfig = {
-  POSTGRESQL: { icon: '🐘', color: 'text-blue-500', label: 'PostgreSQL' },
-  MYSQL: { icon: '🐬', color: 'text-orange-500', label: 'MySQL' },
-  MONGODB: { icon: '🍃', color: 'text-green-500', label: 'MongoDB' },
-  REDIS: { icon: '⚡', color: 'text-red-500', label: 'Redis' },
+  POSTGRESQL: { icon: 'PG', label: 'PostgreSQL' },
+  MYSQL: { icon: 'MY', label: 'MySQL' },
+  MONGODB: { icon: 'MG', label: 'MongoDB' },
+  REDIS: { icon: 'RD', label: 'Redis' },
 };
 
 const statusConfig = {
-  CREATING: { icon: Loader2, color: 'text-blue-500', bg: 'bg-blue-500/10', animate: true },
-  RUNNING: { icon: CheckCircle2, color: 'text-green-500', bg: 'bg-green-500/10' },
-  STOPPED: { icon: Clock, color: 'text-yellow-500', bg: 'bg-yellow-500/10' },
-  FAILED: { icon: Database, color: 'text-red-500', bg: 'bg-red-500/10' },
-};
+  CREATING: { icon: Loader2, color: 'text-foreground/80', bg: 'bg-foreground/10', animate: true },
+  RUNNING: { icon: CheckCircle2, color: 'text-foreground', bg: 'bg-foreground/15' },
+  STOPPED: { icon: Clock, color: 'text-foreground/70', bg: 'bg-foreground/5' },
+  FAILED: { icon: Database, color: 'text-foreground/60', bg: 'bg-foreground/5' },
+} satisfies Record<StatusKey, { icon: React.ElementType; color: string; bg: string; animate?: boolean }>;
 
 export default function DatabasesPage() {
   const [search, setSearch] = useState('');
@@ -65,9 +65,9 @@ export default function DatabasesPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between stagger-in">
         <div>
-          <h1 className="text-3xl font-bold">Databases</h1>
+          <h1 className="text-3xl font-semibold mono-text-gradient">Databases</h1>
           <p className="text-muted-foreground mt-1">
             Provision and manage your databases
           </p>
@@ -84,19 +84,21 @@ export default function DatabasesPage() {
       </div>
 
       {/* Search */}
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Search databases..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="pl-10"
-        />
+      <div className="premium-panel p-3 max-w-md stagger-in animate-delay-1">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search databases..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-10 h-11 rounded-xl"
+          />
+        </div>
       </div>
 
       {/* Databases List */}
       {filteredDatabases.length === 0 ? (
-        <div className="text-center py-12">
+        <div className="premium-panel text-center py-14 stagger-in animate-delay-2">
           <Database className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
           <p className="text-muted-foreground">
             {search ? 'No databases found matching your search' : 'No databases yet'}
@@ -132,19 +134,21 @@ function DatabaseCard({ database }: { database: DatabaseInstance }) {
   const storagePercent = (database.storage.used / database.storage.total) * 100;
 
   return (
-    <div className="rounded-lg border bg-card p-6">
+    <div className="premium-panel premium-card-hover p-6">
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-4">
-          <div className="text-3xl">{typeConfig.icon}</div>
+          <div className="h-11 w-11 rounded-xl bg-foreground/10 border border-foreground/15 flex items-center justify-center">
+            <span className="text-xs tracking-wider font-semibold">{typeConfig.icon}</span>
+          </div>
           <div>
             <div className="flex items-center gap-2">
               <h3 className="font-semibold">{database.name}</h3>
               <span className={`text-xs px-2 py-0.5 rounded ${statusCfg.bg} ${statusCfg.color} flex items-center gap-1`}>
-                <StatusIcon className={`h-3 w-3 ${statusCfg.animate ? 'animate-spin' : ''}`} />
-                {database.status}
-              </span>
-            </div>
-            <p className="text-sm text-muted-foreground">
+                    <StatusIcon className={`h-3 w-3 ${'animate' in statusCfg && statusCfg.animate ? 'animate-spin' : ''}`} />
+                    {database.status}
+                  </span>
+                </div>
+                <p className="text-sm text-muted-foreground">
               {typeConfig.label} {database.version}
             </p>
           </div>
@@ -169,7 +173,7 @@ function DatabaseCard({ database }: { database: DatabaseInstance }) {
         </div>
       </div>
 
-      <div className="mt-4 pt-4 border-t">
+      <div className="mt-4 pt-4 border-t border-border/70">
         <div className="flex items-center justify-between text-sm mb-2">
           <span className="text-muted-foreground">Storage</span>
           <span className="font-medium">{database.storage.used} GB / {database.storage.total} GB</span>
@@ -177,7 +181,7 @@ function DatabaseCard({ database }: { database: DatabaseInstance }) {
         <div className="h-2 bg-muted rounded-full overflow-hidden">
           <div
             className={`h-full rounded-full ${
-              storagePercent > 80 ? 'bg-red-500' : storagePercent > 60 ? 'bg-yellow-500' : 'bg-green-500'
+              storagePercent > 80 ? 'bg-foreground/90' : storagePercent > 60 ? 'bg-foreground/70' : 'bg-foreground/50'
             }`}
             style={{ width: `${storagePercent}%` }}
           />
