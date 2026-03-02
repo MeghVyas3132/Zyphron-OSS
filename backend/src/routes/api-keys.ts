@@ -375,6 +375,14 @@ export async function authenticateApiKey(
     return;
   }
 
+  if (!apiKey.user.isActive) {
+    reply.status(403).send({
+      success: false,
+      error: 'Account is disabled',
+    });
+    return;
+  }
+
   // Update last used (async, don't await)
   prisma.apiKey.update({
     where: { id: apiKey.id },
@@ -382,9 +390,11 @@ export async function authenticateApiKey(
   }).catch(() => {});
 
   // Set user on request
-  (request as FastifyRequest & { user: { id: string; email: string; name: string | null } }).user = {
+  (request as FastifyRequest & { user: { id: string; email: string; name: string | null; role: 'ADMIN' | 'USER'; isActive: boolean } }).user = {
     id: apiKey.user.id,
     email: apiKey.user.email,
     name: apiKey.user.name ?? 'Unknown',
+    role: apiKey.user.role as 'ADMIN' | 'USER',
+    isActive: apiKey.user.isActive,
   };
 }
