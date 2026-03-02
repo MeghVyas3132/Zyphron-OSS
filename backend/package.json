@@ -14,7 +14,7 @@
     "lint:fix": "eslint src --ext .ts --fix",
     "format": "prettier --write \"src/**/*.ts\"",
     "typecheck": "tsc --noEmit",
-    "test": "vitest",
+    "test": "vitest --run --passWithNoTests",
     "test:coverage": "vitest --coverage",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
