@@ -2,8 +2,6 @@
 // ZYPHRON TYPE DEFINITIONS
 // ===========================================
 
-import type { FastifyRequest, FastifyReply } from 'fastify';
-
 // ===========================================
 // API TYPES
 // ===========================================
@@ -51,6 +49,7 @@ export interface PaginationQuery {
 export interface JwtPayload {
   sub: string;
   email: string;
+  role?: 'ADMIN' | 'USER';
   iat: number;
   exp: number;
 }
@@ -60,6 +59,8 @@ export interface AuthUser {
   email: string;
   name?: string;
   avatarUrl?: string;
+  role: 'ADMIN' | 'USER';
+  isActive: boolean;
 }
 
 declare module '@fastify/jwt' {
@@ -71,7 +72,7 @@ declare module '@fastify/jwt' {
 
 declare module 'fastify' {
   interface FastifyRequest {
-    user?: AuthUser;
+    user: AuthUser;
   }
 }
 

@@ -15,6 +15,7 @@ import { getGitService } from './services/git/index.js';
 import { getBuilderService } from './services/builder/index.js';
 import { getDeployerService } from './services/deployer/index.js';
 import { getBuildLogPublisher } from './routes/ws.js';
+import { getGitHubToken } from './lib/github-token.js';
 
 // Multi-service deployment
 import { getMultiServiceDetector, MultiServiceConfig } from './services/detector/multi-service.js';
@@ -46,7 +47,7 @@ const parallelDeployer = new ParallelMultiServiceDeployer(
 interface DeploymentEvent {
   eventType: string;
   type?: string; // Legacy support
-  deploymentId: string;
+  deploymentId?: string;
   buildId?: string;
   projectId?: string;
   userId?: string;
@@ -55,18 +56,57 @@ interface DeploymentEvent {
   commitSha?: string;
   timestamp: string;
   data?: {
-    deploymentId: string;
-    projectId: string;
+    deploymentId?: string;
+    projectId?: string;
+    databaseId?: string;
+    databaseType?: string;
+    databaseName?: string;
+    imageTag?: string;
+    sourceDeploymentId?: string;
+    targetDeploymentId?: string;
+    host?: string;
+    port?: number;
+    status?: string;
     userId?: string;
     environment?: string;
     branch?: string;
     repositoryUrl?: string;
+    reason?: string;
   };
+}
+
+class DeploymentCancelledError extends Error {
+  deploymentId: string;
+
+  constructor(deploymentId: string, message: string = 'Deployment cancelled') {
+    super(message);
+    this.name = 'DeploymentCancelledError';
+    this.deploymentId = deploymentId;
+  }
+}
+
+function isDeploymentCancelledError(error: unknown): error is DeploymentCancelledError {
+  return error instanceof DeploymentCancelledError;
+}
+
+async function assertDeploymentActive(deploymentId: string): Promise<void> {
+  const deployment = await prisma.deployment.findUnique({
+    where: { id: deploymentId },
+    select: { status: true },
+  });
+
+  if (!deployment) {
+    throw new Error(`Deployment ${deploymentId} not found`);
+  }
+
+  if (deployment.status === 'CANCELLED') {
+    throw new DeploymentCancelledError(deploymentId);
+  }
 }
 
 async function handleDeploymentEvent(topic: string, message: unknown): Promise<void> {
   const event = message as DeploymentEvent;
-  const eventType = event.eventType || event.type; // Support both formats
+  const eventType = event.eventType ?? event.type ?? '';
   
   // Extract project info from nested data if present
   const projectId = event.projectId || event.data?.projectId;
@@ -97,16 +137,35 @@ async function handleDeploymentEvent(topic: string, message: unknown): Promise<v
         await handleDeploymentRollback(event);
         break;
 
+      case 'DATABASE_PROVISION_REQUESTED':
+        await handleDatabaseProvisionRequested(event);
+        break;
+
+      case 'DATABASE_DELETE_REQUESTED':
+        await handleDatabaseDeleteRequested(event);
+        break;
+
+      case 'DATABASE_PASSWORD_ROTATE_REQUESTED':
+        await handleDatabasePasswordRotateRequested(event);
+        break;
+
       default:
         logger.warn({ eventType }, 'Unknown deployment event type');
     }
   } catch (error) {
     logger.error({ error, event }, 'Error processing deployment event');
-    
-    // Update deployment status to failed
-    if (event.deploymentId) {
+
+    const lifecycleEventTypes = new Set(['DEPLOYMENT_CREATED', 'BUILD_COMPLETED', 'DEPLOYMENT_ROLLBACK']);
+    const shouldMarkDeploymentFailed = Boolean(
+      deploymentId &&
+      lifecycleEventTypes.has(eventType) &&
+      !isDeploymentCancelledError(error)
+    );
+
+    // Update deployment status to failed for deployment lifecycle events.
+    if (shouldMarkDeploymentFailed) {
       await prisma.deployment.update({
-        where: { id: event.deploymentId },
+        where: { id: deploymentId },
         data: {
           status: 'FAILED',
           completedAt: new Date(),
@@ -128,6 +187,7 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
   }
 
   logger.info({ deploymentId, projectId }, 'Starting deployment build');
+  await assertDeploymentActive(deploymentId);
 
   const startTime = Date.now();
 
@@ -147,6 +207,10 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
       status: 'BUILDING',
       startedAt: new Date(),
     },
+  });
+  await prisma.buildJob.updateMany({
+    where: { deploymentId },
+    data: { status: 'PROCESSING', startedAt: new Date() },
   });
 
   // Get project details
@@ -169,17 +233,23 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
   }
 
   try {
+    await assertDeploymentActive(deploymentId);
+
     // =============================================
     // STEP 1: Clone Repository
     // =============================================
     await publishLog(`📦 Cloning repository: ${project.repositoryUrl}`, 'info', 'clone', 10);
     logger.info({ deploymentId, repoUrl: project.repositoryUrl }, 'Cloning repository');
 
+    const gitToken = project.repositoryProvider === 'GITHUB'
+      ? await getGitHubToken(project.userId)
+      : undefined;
+
     const cloneResult = await gitService.cloneRepository(
       project.repositoryUrl,
       deploymentId,
       branch || project.branch || 'main',
-      undefined // TODO: Add git token support
+      gitToken || undefined
     );
 
     if (!cloneResult.success) {
@@ -205,6 +275,7 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
         branch: cloneResult.branch,
       },
     });
+    await assertDeploymentActive(deploymentId);
 
     // =============================================
     // STEP 2: Detect Multi-Service Project
@@ -221,7 +292,8 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
     if (isMultiService) {
       // Route to multi-service deployment
       await handleMultiServiceDeployment(
-        event,
+        deploymentId,
+        projectId,
         project,
         cloneResult,
         multiServiceConfig,
@@ -231,6 +303,7 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
       );
       return; // Multi-service handler takes over
     }
+    await assertDeploymentActive(deploymentId);
 
     // =============================================
     // STEP 3: Detect Project Framework (Single Service)
@@ -255,6 +328,7 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
     // =============================================
     await publishLog(`🔨 Building Docker image for ${detection.framework}...`, 'info', 'build', 35);
     logger.info({ deploymentId, framework: detection.framework }, 'Building Docker image');
+    await assertDeploymentActive(deploymentId);
 
     const buildLogs: string[] = [];
     const buildResult = await builderService.buildImage({
@@ -299,6 +373,7 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
         buildDuration: Math.round(buildResult.duration / 1000),
       },
     });
+    await assertDeploymentActive(deploymentId);
 
     // =============================================
     // STEP 4: Push Image to Registry
@@ -317,6 +392,7 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
     } else {
       await publishLog('✅ Image pushed to registry', 'info', 'push', 80);
     }
+    await assertDeploymentActive(deploymentId);
 
     // =============================================
     // STEP 5: Deploy Container
@@ -395,6 +471,10 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
         },
       },
     });
+    await prisma.buildJob.updateMany({
+      where: { deploymentId },
+      data: { status: 'COMPLETED', completedAt: new Date(), error: null },
+    });
 
     const totalDuration = Date.now() - startTime;
     
@@ -421,6 +501,33 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
     }, 'Deployment completed successfully');
 
   } catch (error) {
+    if (isDeploymentCancelledError(error)) {
+      logger.warn({ deploymentId, projectId }, 'Deployment cancelled while in progress');
+
+      await logPublisher.publishStatus(deploymentId, { status: 'CANCELLED', message: 'Deployment cancelled' });
+      await logPublisher.publishProjectEvent(projectId, {
+        type: 'deployment_failed',
+        deploymentId,
+        message: 'Deployment cancelled',
+      });
+
+      await prisma.deployment.update({
+        where: { id: deploymentId },
+        data: {
+          status: 'CANCELLED',
+          completedAt: new Date(),
+          errorMessage: 'Deployment cancelled',
+        },
+      });
+      await prisma.buildJob.updateMany({
+        where: { deploymentId },
+        data: { status: 'CANCELLED', completedAt: new Date(), error: 'Deployment cancelled' },
+      });
+
+      await gitService.cleanup(deploymentId);
+      return;
+    }
+
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     
     logger.error({
@@ -446,6 +553,14 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
         errorMessage,
       },
     });
+    await prisma.buildJob.updateMany({
+      where: { deploymentId },
+      data: {
+        status: 'FAILED',
+        failedAt: new Date(),
+        error: errorMessage,
+      },
+    });
 
     // Cleanup cloned repository on failure
     await gitService.cleanup(deploymentId);
@@ -455,13 +570,87 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
 }
 
 async function handleDeploymentCancelled(event: DeploymentEvent): Promise<void> {
-  const { deploymentId } = event;
+  const deploymentId = event.deploymentId || event.data?.deploymentId;
+  const reason = event.data?.reason || 'Deployment cancelled';
+
+  if (!deploymentId) {
+    throw new Error('Cancellation event missing deploymentId');
+  }
 
   logger.info({ deploymentId }, 'Processing deployment cancellation');
 
-  // TODO: Implement actual cancellation logic
-  // 1. Stop running build process
-  // 2. Clean up any partial resources
+  const deployment = await prisma.deployment.findUnique({
+    where: { id: deploymentId },
+    select: {
+      id: true,
+      projectId: true,
+      status: true,
+      metadata: true,
+      buildJob: {
+        select: { id: true, status: true },
+      },
+    },
+  });
+
+  if (!deployment) {
+    logger.warn({ deploymentId }, 'Deployment not found for cancellation');
+    return;
+  }
+
+  const metadata = (
+    deployment.metadata &&
+    typeof deployment.metadata === 'object' &&
+    !Array.isArray(deployment.metadata)
+      ? deployment.metadata
+      : {}
+  ) as Record<string, unknown>;
+
+  const containers = new Set<string>();
+  const directContainerName = typeof metadata.containerName === 'string' ? metadata.containerName : null;
+  const directContainerId = typeof metadata.containerId === 'string' ? metadata.containerId : null;
+  if (directContainerName) containers.add(directContainerName);
+  if (directContainerId) containers.add(directContainerId);
+
+  const serviceMetadata = Array.isArray(metadata.services) ? metadata.services : [];
+  for (const service of serviceMetadata) {
+    if (!service || typeof service !== 'object') continue;
+    const record = service as Record<string, unknown>;
+    if (typeof record.containerName === 'string') containers.add(record.containerName);
+    if (typeof record.containerId === 'string') containers.add(record.containerId);
+  }
+
+  for (const containerRef of containers) {
+    await deployerService.removeContainer(containerRef);
+  }
+
+  await gitService.cleanup(deploymentId);
+
+  await prisma.deployment.update({
+    where: { id: deploymentId },
+    data: {
+      status: 'CANCELLED',
+      completedAt: new Date(),
+      errorMessage: reason,
+    },
+  });
+
+  if (deployment.buildJob && ['PENDING', 'PROCESSING'].includes(deployment.buildJob.status)) {
+    await prisma.buildJob.update({
+      where: { id: deployment.buildJob.id },
+      data: {
+        status: 'CANCELLED',
+        completedAt: new Date(),
+        error: reason,
+      },
+    });
+  }
+
+  await logPublisher.publishStatus(deploymentId, { status: 'CANCELLED', message: reason });
+  await logPublisher.publishProjectEvent(deployment.projectId, {
+    type: 'deployment_failed',
+    deploymentId,
+    message: reason,
+  });
 
   logger.info({ deploymentId }, 'Deployment cancellation processed');
 }
@@ -491,7 +680,8 @@ interface ProjectWithEnv {
 }
 
 async function handleMultiServiceDeployment(
-  event: DeploymentEvent,
+  deploymentId: string,
+  projectId: string,
   project: ProjectWithEnv,
   _cloneResult: CloneResult, // Clone path used by detector
   multiServiceConfig: MultiServiceConfig,
@@ -499,8 +689,6 @@ async function handleMultiServiceDeployment(
   startTime: number,
   publishLog: (message: string, level?: 'info' | 'warn' | 'error', step?: string, progress?: number) => Promise<void>
 ): Promise<void> {
-  const { deploymentId, projectId } = event;
-
   logger.info({
     deploymentId,
     projectId,
@@ -587,6 +775,8 @@ async function handleMultiServiceDeployment(
   });
 
   try {
+    await assertDeploymentActive(deploymentId);
+
     const result = await parallelDeployer.deploy({
       config: multiServiceConfig,
       deploymentId,
@@ -602,6 +792,7 @@ async function handleMultiServiceDeployment(
       const errorMsg = failedServices.map(s => `${s.name}: ${s.error}`).join('; ');
       throw new Error(`Multi-service deployment failed: ${errorMsg}`);
     }
+    await assertDeploymentActive(deploymentId);
 
     // Deployment succeeded - update database
     const totalDuration = Date.now() - startTime;
@@ -637,6 +828,10 @@ async function handleMultiServiceDeployment(
           totalDeployTime: result.totalDeployTime,
         },
       },
+    });
+    await prisma.buildJob.updateMany({
+      where: { deploymentId },
+      data: { status: 'COMPLETED', completedAt: new Date(), error: null },
     });
 
     // Create/update Service records in database
@@ -716,6 +911,31 @@ async function handleMultiServiceDeployment(
     }, 'Multi-service deployment completed successfully');
 
   } catch (error) {
+    if (isDeploymentCancelledError(error)) {
+      await logPublisher.publishStatus(deploymentId, {
+        status: 'CANCELLED',
+        message: 'Deployment cancelled',
+      });
+      await prisma.deployment.update({
+        where: { id: deploymentId },
+        data: {
+          status: 'CANCELLED',
+          completedAt: new Date(),
+          errorMessage: 'Deployment cancelled',
+        },
+      });
+      await prisma.buildJob.updateMany({
+        where: { deploymentId },
+        data: {
+          status: 'CANCELLED',
+          completedAt: new Date(),
+          error: 'Deployment cancelled',
+        },
+      });
+      await gitService.cleanup(deploymentId);
+      return;
+    }
+
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
     logger.error({
@@ -743,6 +963,14 @@ async function handleMultiServiceDeployment(
         errorMessage,
       },
     });
+    await prisma.buildJob.updateMany({
+      where: { deploymentId },
+      data: {
+        status: 'FAILED',
+        failedAt: new Date(),
+        error: errorMessage,
+      },
+    });
 
     // Cleanup
     await gitService.cleanup(deploymentId);
@@ -758,20 +986,119 @@ async function handleMultiServiceDeployment(
 }
 
 async function handleBuildCompleted(event: DeploymentEvent): Promise<void> {
-  const { deploymentId, buildId } = event;
+  const deploymentId = event.deploymentId || event.data?.deploymentId;
+  const { buildId } = event;
+
+  if (!deploymentId) {
+    throw new Error('Build completed event missing deploymentId');
+  }
 
   logger.info({ deploymentId, buildId }, 'Processing build completion');
 
-  // TODO: Implement post-build logic
-  // 1. Start container deployment
-  // 2. Update DNS/routing
-  // 3. Health checks
+  await prisma.buildJob.updateMany({
+    where: { deploymentId },
+    data: {
+      status: 'COMPLETED',
+      completedAt: new Date(),
+    },
+  });
+
+  await prisma.deployment.updateMany({
+    where: { id: deploymentId, status: 'BUILDING' },
+    data: { status: 'DEPLOYING' },
+  });
+
+  await logPublisher.publishStatus(deploymentId, {
+    status: 'DEPLOYING',
+    message: 'Build completed, deployment in progress...',
+  });
 
   logger.info({ deploymentId, buildId }, 'Build completion processed');
 }
 
+async function handleDatabaseProvisionRequested(event: DeploymentEvent): Promise<void> {
+  const databaseId = event.data?.databaseId;
+  if (!databaseId) {
+    throw new Error('Database provision event missing databaseId');
+  }
+
+  const existing = await prisma.database.findUnique({
+    where: { id: databaseId },
+    select: { id: true, status: true },
+  });
+
+  if (!existing) {
+    logger.warn({ databaseId }, 'Database not found for provisioning');
+    return;
+  }
+
+  await prisma.database.update({
+    where: { id: databaseId },
+    data: {
+      status: 'ACTIVE',
+    },
+  });
+
+  logger.info({ databaseId }, 'Database marked ACTIVE');
+}
+
+async function handleDatabaseDeleteRequested(event: DeploymentEvent): Promise<void> {
+  const databaseId = event.data?.databaseId;
+  if (!databaseId) {
+    throw new Error('Database delete event missing databaseId');
+  }
+
+  const existing = await prisma.database.findUnique({
+    where: { id: databaseId },
+    select: { id: true },
+  });
+
+  if (!existing) {
+    logger.warn({ databaseId }, 'Database not found for deletion event');
+    return;
+  }
+
+  await prisma.database.update({
+    where: { id: databaseId },
+    data: { status: 'DELETED' },
+  });
+
+  logger.info({ databaseId }, 'Database marked DELETED');
+}
+
+async function handleDatabasePasswordRotateRequested(event: DeploymentEvent): Promise<void> {
+  const databaseId = event.data?.databaseId;
+  if (!databaseId) {
+    throw new Error('Database password rotation event missing databaseId');
+  }
+
+  const existing = await prisma.database.findUnique({
+    where: { id: databaseId },
+    select: { id: true, status: true },
+  });
+
+  if (!existing) {
+    logger.warn({ databaseId }, 'Database not found for password rotation event');
+    return;
+  }
+
+  // Password update is performed in API route; worker marks the resource healthy.
+  await prisma.database.update({
+    where: { id: databaseId },
+    data: { status: existing.status === 'PROVISIONING' ? 'ACTIVE' : existing.status },
+  });
+
+  logger.info({ databaseId }, 'Database password rotation acknowledged');
+}
+
 async function handleDeploymentRollback(event: DeploymentEvent): Promise<void> {
-  const { deploymentId, projectId, imageTag } = event as DeploymentEvent & { imageTag: string };
+  const deploymentId = event.deploymentId || event.data?.deploymentId;
+  const imageTag = (event as DeploymentEvent & { imageTag?: string }).imageTag || (event.data as { imageTag?: string } | undefined)?.imageTag;
+  const projectId = event.projectId || event.data?.projectId;
+
+  if (!deploymentId || !projectId || !imageTag) {
+    throw new Error('Rollback event missing deploymentId, projectId, or imageTag');
+  }
 
   logger.info({ deploymentId, projectId, imageTag }, 'Processing deployment rollback');
 
@@ -784,6 +1111,10 @@ async function handleDeploymentRollback(event: DeploymentEvent): Promise<void> {
 
   await logPublisher.publishStatus(deploymentId, { status: 'DEPLOYING', message: 'Starting rollback...' });
   await publishLog('⏪ Rollback initiated', 'info', 'init', 0);
+  await prisma.buildJob.updateMany({
+    where: { deploymentId },
+    data: { status: 'PROCESSING', startedAt: new Date() },
+  });
 
   try {
     // Get project details
@@ -801,12 +1132,20 @@ async function handleDeploymentRollback(event: DeploymentEvent): Promise<void> {
     // Deploy the existing image (skip build entirely)
     await publishLog('Deploying container with existing image...', 'info', 'deploy', 50);
 
+    const lastColonIndex = imageTag.lastIndexOf(':');
+    const rollbackImageName = lastColonIndex > 0
+      ? imageTag.slice(0, lastColonIndex)
+      : `${config.docker.registry}/${project.slug}`;
+    const rollbackImageTag = lastColonIndex > 0
+      ? imageTag.slice(lastColonIndex + 1)
+      : imageTag;
+
     const deployResult = await deployerService.deploy({
       projectId,
       deploymentId,
       projectSlug: project.slug,
-      imageName: `${config.docker.registry}/${project.slug}`,
-      imageTag,
+      imageName: rollbackImageName,
+      imageTag: rollbackImageTag,
       port: 3000,
       envVars: project.envVariables.reduce((acc: Record<string, string>, v: { key: string; value: string }) => {
         acc[v.key] = v.value;
@@ -832,6 +1171,10 @@ async function handleDeploymentRollback(event: DeploymentEvent): Promise<void> {
         completedAt: new Date(),
         url: `https://${project.subdomain}.${config.deployment.baseDomain}`,
       },
+    });
+    await prisma.buildJob.updateMany({
+      where: { deploymentId },
+      data: { status: 'COMPLETED', completedAt: new Date(), error: null },
     });
 
     await publishLog(`✅ Rollback complete in ${(duration / 1000).toFixed(2)}s`, 'info', 'complete', 100);
@@ -867,6 +1210,14 @@ async function handleDeploymentRollback(event: DeploymentEvent): Promise<void> {
         status: 'FAILED',
         completedAt: new Date(),
         errorMessage,
+      },
+    });
+    await prisma.buildJob.updateMany({
+      where: { deploymentId },
+      data: {
+        status: 'FAILED',
+        failedAt: new Date(),
+        error: errorMessage,
       },
     });
 
