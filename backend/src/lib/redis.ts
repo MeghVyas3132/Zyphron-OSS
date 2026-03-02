@@ -2,7 +2,7 @@
 // REDIS CLIENT
 // ===========================================
 
-import Redis from 'ioredis';
+import { Redis } from 'ioredis';
 import { config } from '@/config/index.js';
 import { createLogger } from '@/lib/logger.js';
 
@@ -19,7 +19,7 @@ export function getRedisClient(): Redis {
   if (!redisClient) {
     redisClient = new Redis(config.redis.url, {
       maxRetriesPerRequest: 3,
-      retryStrategy(times) {
+      retryStrategy(times: number) {
         const delay = Math.min(times * 50, 2000);
         return delay;
       },
@@ -30,7 +30,7 @@ export function getRedisClient(): Redis {
       logger.info('Redis connected');
     });
 
-    redisClient.on('error', (err) => {
+    redisClient.on('error', (err: Error) => {
       logger.error({ err }, 'Redis connection error');
     });
 
@@ -53,7 +53,7 @@ export function getSubscriberClient(): Redis {
       logger.info('Redis subscriber connected');
     });
 
-    subscriberClient.on('error', (err) => {
+    subscriberClient.on('error', (err: Error) => {
       logger.error({ err }, 'Redis subscriber error');
     });
   }
@@ -147,7 +147,7 @@ export async function subscribe(
   const client = getSubscriberClient();
   await client.subscribe(channel);
   
-  client.on('message', (ch, msg) => {
+  client.on('message', (ch: string, msg: string) => {
     if (ch === channel) {
       callback(JSON.parse(msg));
     }

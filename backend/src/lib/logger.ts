@@ -3,7 +3,7 @@
 // Pino-based structured logging
 // ===========================================
 
-import pino from 'pino';
+import { pino } from 'pino';
 import { config } from '@/config/index.js';
 
 // ===========================================
@@ -31,16 +31,16 @@ export const logger = pino({
   
   // Serializers for common objects
   serializers: {
-    req: (req) => ({
+    req: (req: { method?: unknown; url?: unknown; headers?: Record<string, unknown> }) => ({
       method: req.method,
       url: req.url,
       headers: {
-        host: req.headers.host,
-        'user-agent': req.headers['user-agent'],
-        'x-request-id': req.headers['x-request-id'],
+        host: req.headers?.host,
+        'user-agent': req.headers?.['user-agent'],
+        'x-request-id': req.headers?.['x-request-id'],
       },
     }),
-    res: (res) => ({
+    res: (res: { statusCode?: number }) => ({
       statusCode: res.statusCode,
     }),
     err: pino.stdSerializers.err,
