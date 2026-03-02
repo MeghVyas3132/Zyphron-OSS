@@ -34,11 +34,17 @@ export default function ProjectsPage() {
   const [search, setSearch] = useState('');
   const { data, isLoading, isError, error, refetch } = useProjects();
 
-  // Handle nested data structure: data.data.projects or data.data (array) or empty array
   const projectsData = data?.data;
-  const projects: Project[] = Array.isArray(projectsData) 
-    ? projectsData 
-    : (projectsData?.projects || []);
+  const projects: Project[] = Array.isArray(projectsData)
+    ? projectsData
+    : (
+        projectsData &&
+        typeof projectsData === 'object' &&
+        'projects' in projectsData &&
+        Array.isArray((projectsData as { projects?: unknown }).projects)
+          ? ((projectsData as { projects: Project[] }).projects || [])
+          : []
+      );
   
   const filteredProjects = projects.filter(
     (project) =>
@@ -72,9 +78,9 @@ export default function ProjectsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between stagger-in">
         <div>
-          <h1 className="text-3xl font-bold">Projects</h1>
+          <h1 className="text-3xl font-semibold mono-text-gradient">Projects</h1>
           <p className="text-muted-foreground mt-1">
             Manage and deploy your applications
           </p>
@@ -93,19 +99,21 @@ export default function ProjectsPage() {
       </div>
 
       {/* Search */}
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Search projects..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="pl-10"
-        />
+      <div className="premium-panel p-3 max-w-md stagger-in animate-delay-1">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search projects..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-10 h-11 rounded-xl"
+          />
+        </div>
       </div>
 
       {/* Projects Grid */}
       {filteredProjects.length === 0 ? (
-        <div className="text-center py-12">
+        <div className="premium-panel text-center py-16 stagger-in animate-delay-2">
           <p className="text-muted-foreground">
             {search ? 'No projects found matching your search' : 'No projects yet'}
           </p>
@@ -127,19 +135,25 @@ export default function ProjectsPage() {
 }
 
 function ProjectCard({ project }: { project: Project }) {
-  const frameworkIcon = frameworkIcons[project.framework || 'unknown'] || '📦';
+  const framework = project.framework || 'unknown';
+  const frameworkIcon = frameworkIcons[framework] || '📦';
+  const frameworkAbbr = framework.toUpperCase().slice(0, 3);
 
   return (
     <Link href={`/projects/${project.slug}`}>
-      <div className="rounded-lg border bg-card p-6 hover:border-primary transition-colors cursor-pointer group">
+      <div className="premium-panel premium-card-hover p-6 cursor-pointer group">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
-            <span className="text-2xl">{frameworkIcon}</span>
+            <div className="h-11 w-11 rounded-xl bg-foreground/10 flex items-center justify-center border border-foreground/15">
+              <span className="text-[11px] font-semibold tracking-wide">{frameworkAbbr}</span>
+            </div>
             <div>
-              <h3 className="font-semibold group-hover:text-primary transition-colors">
+              <h3 className="font-semibold group-hover:opacity-75 transition-opacity">
                 {project.name}
               </h3>
-              <p className="text-sm text-muted-foreground">{project.slug}</p>
+              <p className="text-xs text-muted-foreground uppercase tracking-[0.16em] mt-1">
+                {frameworkIcon} {project.slug}
+              </p>
             </div>
           </div>
           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => e.preventDefault()}>
@@ -170,11 +184,11 @@ function ProjectCard({ project }: { project: Project }) {
           </div>
         </div>
 
-        <div className="mt-4 pt-4 border-t flex items-center justify-between text-sm">
+        <div className="mt-4 pt-4 border-t border-border/70 flex items-center justify-between text-sm">
           <span className="text-muted-foreground">
             {project._count?.deployments || 0} deployments
           </span>
-          <span className="text-primary font-medium">View →</span>
+          <span className="font-medium">View →</span>
         </div>
       </div>
     </Link>
