@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { 
+import { motion } from 'framer-motion';
+import {
   ArrowUpRight,
   GitBranch,
   Clock,
@@ -18,6 +19,15 @@ import {
 import { Button } from '@/components/ui/button';
 import { formatRelativeTime } from '@/lib/utils';
 import { useDashboardMetrics } from '@/hooks/use-dashboard';
+
+const containerVariants = {
+  hidden: { opacity: 0 },
+  show: { opacity: 1, transition: { staggerChildren: 0.09 } },
+};
+const itemVariants = {
+  hidden: { opacity: 0, y: 16 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.55, ease: [0.19, 1, 0.22, 1] as const } },
+};
 
 interface RecentDeployment {
   id: string;
@@ -75,9 +85,9 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="space-y-8">
+    <motion.div variants={containerVariants} initial="hidden" animate="show" className="space-y-8">
       {/* Header */}
-      <div className="flex items-center justify-between stagger-in">
+      <motion.div variants={itemVariants} className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-semibold mono-text-gradient">Dashboard</h1>
           <p className="text-muted-foreground mt-1">
@@ -87,36 +97,26 @@ export default function DashboardPage() {
         <Button onClick={() => refetch()} variant="outline" size="icon">
           <RefreshCw className="h-4 w-4" />
         </Button>
-      </div>
+      </motion.div>
 
       {/* Stats Grid */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          title="Total Projects"
-          value={overview?.totalProjects || 0}
-          icon={FolderKanban}
-          href="/projects"
-        />
-        <StatCard
-          title="Active Deployments"
-          value={overview?.activeDeployments || 0}
-          icon={Server}
-        />
-        <StatCard
-          title="Databases"
-          value={overview?.totalDatabases || 0}
-          icon={Database}
-          href="/databases"
-        />
-        <StatCard
-          title="Success Rate"
-          value={`${metrics?.deployments?.successRate?.toFixed(1) || 0}%`}
-          icon={Activity}
-        />
-      </div>
+      <motion.div variants={containerVariants} className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <motion.div variants={itemVariants}>
+          <StatCard title="Total Projects" value={overview?.totalProjects || 0} icon={FolderKanban} href="/projects" />
+        </motion.div>
+        <motion.div variants={itemVariants}>
+          <StatCard title="Active Deployments" value={overview?.activeDeployments || 0} icon={Server} />
+        </motion.div>
+        <motion.div variants={itemVariants}>
+          <StatCard title="Databases" value={overview?.totalDatabases || 0} icon={Database} href="/databases" />
+        </motion.div>
+        <motion.div variants={itemVariants}>
+          <StatCard title="Success Rate" value={`${metrics?.deployments?.successRate?.toFixed(1) || 0}%`} icon={Activity} />
+        </motion.div>
+      </motion.div>
 
       {/* Recent Deployments */}
-      <div className="space-y-4">
+      <motion.div variants={itemVariants} className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-semibold">Recent Deployments</h2>
           <Link href="/projects">
@@ -179,10 +179,10 @@ export default function DashboardPage() {
             </div>
           )}
         </div>
-      </div>
+      </motion.div>
 
       {/* Quick Actions */}
-      <div className="space-y-4">
+      <motion.div variants={itemVariants} className="space-y-4">
         <h2 className="text-xl font-semibold">Quick Actions</h2>
         <div className="grid gap-4 md:grid-cols-3">
           <Link href="/projects/new">
@@ -213,8 +213,8 @@ export default function DashboardPage() {
             </div>
           </Link>
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }
 

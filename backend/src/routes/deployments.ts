@@ -233,7 +233,12 @@ export async function deploymentRoutes(app: FastifyInstance): Promise<void> {
   }, async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     const userId = request.user?.id as string;
     const { id } = request.params;
-    const body = rollbackSchema.parse(request.body);
+    let body: { targetDeploymentId: string };
+    try {
+      body = rollbackSchema.parse(request.body);
+    } catch {
+      return reply.status(400).send({ error: 'targetDeploymentId is required' });
+    }
 
     const current = await getDeploymentForUser(id, userId, TEAM_ROLES_WRITE);
     if (!current) return reply.status(404).send({ error: 'Deployment not found' });
@@ -374,7 +379,7 @@ export async function deploymentRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(404).send({ error: 'Deployment not found' });
     }
 
-    return reply.send({ deployment });
+    return reply.send({ success: true, data: deployment });
   });
 
   app.post('/projects/:projectId/deployments/:id/cancel', {

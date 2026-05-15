@@ -5,11 +5,13 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
+import { OAuth2Client } from 'google-auth-library';
 import { prisma } from '@/lib/prisma.js';
 import { createLogger } from '@/lib/logger.js';
 import { config } from '@/config/index.js';
 import { storeGitHubToken } from '@/lib/github-token.js';
 import { createAuditLog } from '@/services/audit/index.js';
+import { emailService } from '@/services/email/index.js';
 
 const logger = createLogger('auth');
 
@@ -116,6 +118,9 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       });
 
       logger.info({ userId: user.id, email }, 'New user registered');
+
+      // Send welcome email (non-blocking)
+      void emailService.sendWelcome(email, name);
 
       return reply.status(201).send({
         success: true,
@@ -258,7 +263,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   // GitHub OAuth initiation
   app.get('/github', async (_request: FastifyRequest, reply: FastifyReply) => {
     if (!config.github.clientId) {
-      return reply.status(500).send({
+      return reply.status(400).send({
         success: false,
         error: {
           code: 'GITHUB_NOT_CONFIGURED',
@@ -401,6 +406,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
             lastLoginAt: new Date(),
           },
         });
+        // Send welcome email for new GitHub users (non-blocking)
+        void emailService.sendWelcome(email, user.name || githubUser.login);
       }
 
       // Generate JWT
@@ -622,5 +629,176 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       success: true,
       data: { message: 'Logged out successfully' },
     });
+  });
+
+  // ===========================================
+  // GOOGLE OAUTH
+  // ===========================================
+
+  app.get('/google', async (_request: FastifyRequest, reply: FastifyReply) => {
+    if (!config.google.clientId) {
+      return reply.status(400).send({
+        success: false,
+        error: { code: 'GOOGLE_NOT_CONFIGURED', message: 'Google OAuth is not configured' },
+      });
+    }
+
+    const client = new OAuth2Client(
+      config.google.clientId,
+      config.google.clientSecret,
+      config.google.callbackUrl
+    );
+
+    const url = client.generateAuthUrl({
+      access_type: 'offline',
+      scope: ['openid', 'email', 'profile'],
+      prompt: 'select_account',
+    });
+
+    return reply.send({ success: true, data: { redirectUrl: url } });
+  });
+
+  app.post('/google/callback', async (request: FastifyRequest, reply: FastifyReply) => {
+    const body = request.body as { code?: string; credential?: string };
+
+    if (!config.google.clientId || !config.google.clientSecret) {
+      return reply.status(400).send({
+        success: false,
+        error: { code: 'GOOGLE_NOT_CONFIGURED', message: 'Google OAuth is not configured' },
+      });
+    }
+
+    try {
+      const client = new OAuth2Client(
+        config.google.clientId,
+        config.google.clientSecret,
+        config.google.callbackUrl
+      );
+
+      let googleEmail: string;
+      let googleName: string;
+      let googleAvatarUrl: string;
+
+      if (body.credential) {
+        // ID token flow (Google One Tap)
+        const ticket = await client.verifyIdToken({
+          idToken: body.credential,
+          audience: config.google.clientId,
+        });
+        const payload = ticket.getPayload();
+        if (!payload || !payload.email) {
+          return reply.status(400).send({
+            success: false,
+            error: { code: 'GOOGLE_AUTH_FAILED', message: 'Invalid Google credential' },
+          });
+        }
+        googleEmail = payload.email;
+        googleName = payload.name || payload.email.split('@')[0];
+        googleAvatarUrl = payload.picture || '';
+        void payload.sub; // Google sub not stored yet — user identified by email
+      } else if (body.code) {
+        // Authorization code flow
+        const { tokens } = await client.getToken(body.code);
+        client.setCredentials(tokens);
+
+        if (!tokens.id_token) {
+          return reply.status(400).send({
+            success: false,
+            error: { code: 'GOOGLE_AUTH_FAILED', message: 'No ID token received from Google' },
+          });
+        }
+
+        const ticket = await client.verifyIdToken({
+          idToken: tokens.id_token,
+          audience: config.google.clientId,
+        });
+        const payload = ticket.getPayload();
+        if (!payload || !payload.email) {
+          return reply.status(400).send({
+            success: false,
+            error: { code: 'GOOGLE_AUTH_FAILED', message: 'Could not get email from Google' },
+          });
+        }
+        googleEmail = payload.email;
+        googleName = payload.name || payload.email.split('@')[0];
+        googleAvatarUrl = payload.picture || '';
+        void payload.sub; // Google sub not stored yet — user identified by email
+      } else {
+        return reply.status(400).send({
+          success: false,
+          error: { code: 'VALIDATION_ERROR', message: 'code or credential is required' },
+        });
+      }
+
+      // Find or create user
+      let user = await prisma.user.findFirst({
+        where: { OR: [{ email: googleEmail }] },
+      });
+
+      const isNew = !user;
+
+      if (user) {
+        user = await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            avatarUrl: googleAvatarUrl || user.avatarUrl,
+            role: isBootstrapAdminEmail(googleEmail) ? 'ADMIN' : user.role,
+            lastLoginAt: new Date(),
+          },
+        });
+      } else {
+        user = await prisma.user.create({
+          data: {
+            email: googleEmail,
+            name: googleName,
+            avatarUrl: googleAvatarUrl,
+            role: isBootstrapAdminEmail(googleEmail) ? 'ADMIN' : 'USER',
+            lastLoginAt: new Date(),
+          },
+        });
+      }
+
+      if (isNew) void emailService.sendWelcome(googleEmail, googleName);
+
+      const token = app.jwt.sign({
+        sub: user.id,
+        email: user.email,
+        role: user.role,
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + (60 * 60 * 24 * 7),
+      });
+
+      await createAuditLog({
+        userId: user.id,
+        action: 'user.login',
+        resourceType: 'user',
+        resourceId: user.id,
+        metadata: { provider: 'google' },
+        request,
+      });
+
+      logger.info({ userId: user.id }, 'User authenticated via Google');
+
+      return reply.send({
+        success: true,
+        data: {
+          token,
+          user: {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            avatarUrl: user.avatarUrl,
+            role: user.role,
+            isActive: user.isActive,
+          },
+        },
+      });
+    } catch (error) {
+      logger.error({ error }, 'Google authentication error');
+      return reply.status(500).send({
+        success: false,
+        error: { code: 'AUTH_ERROR', message: 'Google authentication failed' },
+      });
+    }
   });
 }

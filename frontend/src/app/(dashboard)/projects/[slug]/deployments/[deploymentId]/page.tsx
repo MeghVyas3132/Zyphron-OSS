@@ -1,22 +1,20 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { 
-  ArrowLeft, 
-  GitBranch, 
+import { motion } from 'framer-motion';
+import {
+  ArrowLeft,
+  GitBranch,
   Clock,
   ExternalLink,
   RefreshCw,
   CheckCircle2,
   XCircle,
   Loader2,
-  Terminal,
   AlertCircle,
   RotateCcw,
-  Copy,
-  Check,
   Globe,
   Box
 } from 'lucide-react';
@@ -24,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { formatRelativeTime } from '@/lib/utils';
 import { useProject } from '@/hooks/use-projects';
 import { useDeployment, useCancelDeployment, useRollback } from '@/hooks/use-deployments';
+import { TerminalLog, type LogLine } from '@/components/ui/terminal-log';
 
 const statusConfig: Record<string, { icon: typeof Clock; color: string; bg: string; label: string; animate?: boolean }> = {
   QUEUED: { icon: Clock, color: 'text-yellow-500', bg: 'bg-yellow-500/10', label: 'Queued' },
@@ -38,11 +37,6 @@ const statusConfig: Record<string, { icon: typeof Clock; color: string; bg: stri
   ROLLING_BACK: { icon: Loader2, color: 'text-orange-500', bg: 'bg-orange-500/10', label: 'Rolling Back', animate: true },
 };
 
-interface LogLine {
-  timestamp: string;
-  message: string;
-  level: 'info' | 'error' | 'warn' | 'success';
-}
 
 export default function DeploymentDetailPage() {
   const params = useParams();
@@ -50,9 +44,6 @@ export default function DeploymentDetailPage() {
   const slug = params.slug as string;
   const deploymentId = params.deploymentId as string;
   
-  const logContainerRef = useRef<HTMLDivElement>(null);
-  const [autoScroll, setAutoScroll] = useState(true);
-  const [copied, setCopied] = useState(false);
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [wsConnected, setWsConnected] = useState(false);
   
@@ -86,18 +77,23 @@ export default function DeploymentDetailPage() {
         const data = JSON.parse(event.data);
         if (data.type === 'log') {
           setLogs((prev) => [...prev, {
-            timestamp: data.timestamp || new Date().toISOString(),
+            id: `${Date.now()}-${prev.length}`,
+            timestamp: data.timestamp
+              ? new Date(data.timestamp).toLocaleTimeString()
+              : new Date().toLocaleTimeString(),
             message: data.message,
-            level: data.level || 'info',
+            level: (data.level as LogLine['level']) || 'info',
+            step: data.step,
+            progress: data.progress,
           }]);
         } else if (data.type === 'status') {
-          refetch();
+          void refetch();
         }
-      } catch (e) {
-        // Plain text log
+      } catch {
         setLogs((prev) => [...prev, {
-          timestamp: new Date().toISOString(),
-          message: event.data,
+          id: `${Date.now()}-${prev.length}`,
+          timestamp: new Date().toLocaleTimeString(),
+          message: event.data as string,
           level: 'info',
         }]);
       }
@@ -117,24 +113,23 @@ export default function DeploymentDetailPage() {
     };
   }, [deployment, deploymentId, isActive, refetch]);
 
-  // Auto-scroll logs
-  useEffect(() => {
-    if (autoScroll && logContainerRef.current) {
-      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
-    }
-  }, [logs, autoScroll]);
-
   // Parse existing logs if present
   useEffect(() => {
     if (deployment?.logs && logs.length === 0) {
-      const existingLogs = deployment.logs.split('\n').filter(Boolean).map((line) => ({
-        timestamp: new Date().toISOString(),
+      const existingLogs = deployment.logs.split('\n').filter(Boolean).map((line, i) => ({
+        id: `existing-${i}`,
+        timestamp: new Date().toLocaleTimeString(),
         message: line,
-        level: 'info' as const,
+        level: 'info' as LogLine['level'],
       }));
       setLogs(existingLogs);
     }
   }, [deployment?.logs, logs.length]);
+
+  const itemAnim = {
+    hidden: { opacity: 0, y: 16 },
+    show: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.19, 1, 0.22, 1] as const } },
+  };
 
   const handleCancel = async () => {
     if (!confirm('Are you sure you want to cancel this deployment?')) return;
@@ -154,13 +149,6 @@ export default function DeploymentDetailPage() {
     } catch (error) {
       console.error('Failed to rollback:', error);
     }
-  };
-
-  const copyLogs = () => {
-    const logText = logs.map((l) => `[${l.timestamp}] ${l.message}`).join('\n');
-    navigator.clipboard.writeText(logText);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   };
 
   const formatDuration = (start: string, end?: string | null) => {
@@ -197,7 +185,12 @@ export default function DeploymentDetailPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <motion.div
+      variants={{ hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.08 } } }}
+      initial="hidden"
+      animate="show"
+      className="space-y-6"
+    >
       {/* Header */}
       <div className="flex items-center gap-4">
         <Link href={`/projects/${slug}`}>
@@ -317,77 +310,14 @@ export default function DeploymentDetailPage() {
       </div>
 
       {/* Build Logs */}
-      <div className="rounded-lg border bg-card">
-        <div className="flex items-center justify-between p-4 border-b">
-          <div className="flex items-center gap-2">
-            <Terminal className="h-5 w-5" />
-            <h3 className="font-semibold">Build Logs</h3>
-            {wsConnected && (
-              <span className="flex items-center gap-1 text-xs text-green-500">
-                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                Live
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <Button 
-              variant="ghost" 
-              size="sm"
-              onClick={() => setAutoScroll(!autoScroll)}
-              className={autoScroll ? 'text-primary' : ''}
-            >
-              Auto-scroll: {autoScroll ? 'On' : 'Off'}
-            </Button>
-            <Button variant="ghost" size="sm" onClick={copyLogs} className="gap-2">
-              {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-              {copied ? 'Copied' : 'Copy'}
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => refetch()}>
-              <RefreshCw className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-        
-        <div 
-          ref={logContainerRef}
-          className="bg-zinc-950 p-4 font-mono text-sm h-[500px] overflow-auto"
-          onScroll={(e) => {
-            const el = e.currentTarget;
-            const isAtBottom = el.scrollHeight - el.scrollTop === el.clientHeight;
-            setAutoScroll(isAtBottom);
-          }}
-        >
-          {logs.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-muted-foreground">
-              {isActive ? (
-                <div className="flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Waiting for logs...
-                </div>
-              ) : (
-                'No logs available'
-              )}
-            </div>
-          ) : (
-            logs.map((log, i) => (
-              <div 
-                key={i} 
-                className={`py-0.5 ${
-                  log.level === 'error' ? 'text-red-400' :
-                  log.level === 'warn' ? 'text-yellow-400' :
-                  log.level === 'success' ? 'text-green-400' :
-                  'text-zinc-300'
-                }`}
-              >
-                <span className="text-zinc-600 mr-2">
-                  [{new Date(log.timestamp).toLocaleTimeString()}]
-                </span>
-                {log.message}
-              </div>
-            ))
-          )}
-        </div>
-      </div>
+      <motion.div variants={itemAnim}>
+        <TerminalLog
+          logs={logs}
+          connected={isActive ? wsConnected : undefined}
+          title="Build Logs"
+          maxHeight="500px"
+        />
+      </motion.div>
 
       {/* Error Details */}
       {deployment.status === 'FAILED' && deployment.logs && (
@@ -410,6 +340,6 @@ export default function DeploymentDetailPage() {
           </div>
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }
