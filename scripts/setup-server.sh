@@ -86,6 +86,7 @@ RESEND_FROM=Zyphron <noreply@${DOMAIN}>
 GROQ_API_KEYS=${GROQ_API_KEYS:-}
 
 REGISTRY_URL=localhost:5000
+BOOTSTRAP_ADMIN_EMAILS=${BOOTSTRAP_ADMIN_EMAILS:-}
 EOF
 ok ".env.prod written"
 

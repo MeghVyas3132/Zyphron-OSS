@@ -123,6 +123,7 @@ services:
       PROMETHEUS_URL: http://prometheus:9090
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       ALLOW_DEV_TOKEN_BYPASS: "false"
+      BOOTSTRAP_ADMIN_EMAILS: ${BOOTSTRAP_ADMIN_EMAILS:-}
       LOG_LEVEL: info
     volumes:
       - projects_data:/app/projects
