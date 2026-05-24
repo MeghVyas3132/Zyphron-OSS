@@ -458,11 +458,11 @@ export class PreviewEnvironmentService {
               'User-Agent': 'Zyphron-Deploy',
             },
             body: JSON.stringify({
-              body: `## 🚀 Preview Deployment Ready\n\n` +
+              body: `## Launch Preview Deployment Ready\n\n` +
                 `| Name | Link |\n` +
                 `| --- | --- |\n` +
-                `| 🔗 Preview URL | [${preview.url}](${preview.url}) |\n` +
-                `| 📦 Commit | \`${preview.commitSha.slice(0, 7)}\` |\n` +
+                `| Dependency Preview URL | [${preview.url}](${preview.url}) |\n` +
+                `| Package Commit | \`${preview.commitSha.slice(0, 7)}\` |\n` +
                 `| ⏰ Expires | ${new Date(preview.expiresAt).toLocaleDateString()} |\n\n` +
                 `---\n` +
                 `*Deployed by [Zyphron](https://zyphron.dev)*`,

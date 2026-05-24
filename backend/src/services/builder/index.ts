@@ -386,7 +386,7 @@ export class BuilderService {
         dockerfilePath = path.join(projectPath, 'Dockerfile.zyphron');
         await fs.writeFile(dockerfilePath, dockerfileContent);
 
-        buildLogs.push(`📝 Generated Dockerfile for ${detection.framework} project`);
+        buildLogs.push(`Notes Generated Dockerfile for ${detection.framework} project`);
         this.logMessage(`Generated Dockerfile for ${detection.framework}`, onLog);
       }
 
@@ -430,7 +430,7 @@ venv
       }
 
       // Build the image
-      buildLogs.push('🔨 Building Docker image...');
+      buildLogs.push('Build Building Docker image...');
       this.logMessage('Building Docker image...', onLog);
 
       const stream = await this.docker.buildImage(tarStream, {
@@ -467,7 +467,7 @@ venv
               lastImageId = event.aux.ID;
             }
             if (event.error) {
-              buildLogs.push(`❌ Error: ${event.error}`);
+              buildLogs.push(`Error Error: ${event.error}`);
               this.logMessage(`Error: ${event.error}`, onLog);
             }
           }
@@ -480,7 +480,7 @@ venv
       }
 
       const duration = Date.now() - startTime;
-      buildLogs.push(`✅ Build completed in ${Math.round(duration / 1000)}s`);
+      buildLogs.push(`Success Build completed in ${Math.round(duration / 1000)}s`);
       this.logMessage(`Build completed in ${Math.round(duration / 1000)}s`, onLog);
 
       logger.info({
@@ -502,7 +502,7 @@ venv
       const duration = Date.now() - startTime;
       const errorMessage = error instanceof Error ? error.message : 'Unknown build error';
       
-      buildLogs.push(`❌ Build failed: ${errorMessage}`);
+      buildLogs.push(`Error Build failed: ${errorMessage}`);
       this.logMessage(`Build failed: ${errorMessage}`, onLog);
 
       logger.error({

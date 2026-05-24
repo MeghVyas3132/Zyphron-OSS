@@ -1,5 +1,5 @@
 // ===========================================
-// KAFKA CLIENT
+// KAFKA CLIENT — with soft-gate (non-fatal if down)
 // ===========================================
 
 import { Kafka, Producer, Consumer, logLevel } from 'kafkajs';
@@ -7,10 +7,6 @@ import { config } from '@/config/index.js';
 import { createLogger } from '@/lib/logger.js';
 
 const logger = createLogger('kafka');
-
-// ===========================================
-// KAFKA TOPICS
-// ===========================================
 
 export const TOPICS = {
   DEPLOYMENTS: 'zyphron.deployments',
@@ -20,50 +16,60 @@ export const TOPICS = {
   AUDIT: 'zyphron.audit',
 } as const;
 
-// ===========================================
-// KAFKA CLIENT SINGLETON
-// ===========================================
-
 let kafka: Kafka | null = null;
 let producerInstance: Producer | null = null;
+let kafkaAvailable = false;
 
 function getKafkaClient(): Kafka {
   if (!kafka) {
     kafka = new Kafka({
       clientId: config.kafka.clientId,
       brokers: config.kafka.brokers,
-      logLevel: config.env === 'development' ? logLevel.DEBUG : logLevel.ERROR,
-      retry: {
-        initialRetryTime: 100,
-        retries: 8,
-      },
+      logLevel: config.env === 'development' ? logLevel.NOTHING : logLevel.ERROR,
+      retry: { initialRetryTime: 300, retries: 3 },
     });
   }
   return kafka;
 }
 
 // ===========================================
-// PRODUCER
+// PRODUCER — soft-gate, returns null if unavailable
 // ===========================================
 
-export async function getProducer(): Promise<Producer> {
-  if (!producerInstance) {
+export async function connectKafka(): Promise<boolean> {
+  if (!config.kafka.enabled) {
+    logger.info('Kafka disabled via config — skipping');
+    return false;
+  }
+
+  try {
     const client = getKafkaClient();
     producerInstance = client.producer({
       allowAutoTopicCreation: true,
       transactionTimeout: 30000,
     });
-    
     await producerInstance.connect();
+    kafkaAvailable = true;
     logger.info('Kafka producer connected');
+    return true;
+  } catch (error) {
+    logger.warn({ error }, 'Kafka unavailable — running without event streaming (deployments still work via direct BullMQ)');
+    producerInstance = null;
+    kafkaAvailable = false;
+    return false;
   }
+}
+
+export async function getProducer(): Promise<Producer | null> {
+  if (!kafkaAvailable || !producerInstance) return null;
   return producerInstance;
 }
 
-// Export producer object for direct use in routes
 export const producer = {
   async send(payload: { topic: string; messages: Array<{ key?: string; value: string }> }) {
+    if (!kafkaAvailable) return;
     const prod = await getProducer();
+    if (!prod) return;
     return prod.send(payload);
   },
 };
@@ -72,8 +78,10 @@ export async function sendMessage(
   topic: string,
   messages: { key?: string; value: unknown; headers?: Record<string, string> }[]
 ): Promise<void> {
+  if (!kafkaAvailable) return;
   const prod = await getProducer();
-  
+  if (!prod) return;
+
   await prod.send({
     topic,
     messages: messages.map((msg) => ({
@@ -91,12 +99,7 @@ export async function sendDeploymentEvent(
 ): Promise<void> {
   await sendMessage(TOPICS.DEPLOYMENTS, [{
     key: deploymentId,
-    value: {
-      eventType,
-      deploymentId,
-      timestamp: new Date().toISOString(),
-      data,
-    },
+    value: { eventType, deploymentId, timestamp: new Date().toISOString(), data },
   }]);
 }
 
@@ -107,12 +110,7 @@ export async function sendBuildLog(
 ): Promise<void> {
   await sendMessage(TOPICS.BUILD_LOGS, [{
     key: deploymentId,
-    value: {
-      deploymentId,
-      line,
-      stream,
-      timestamp: new Date().toISOString(),
-    },
+    value: { deploymentId, line, stream, timestamp: new Date().toISOString() },
   }]);
 }
 
@@ -124,17 +122,22 @@ export async function createConsumer(
   groupId: string,
   topics: string[],
   handler: (topic: string, message: unknown) => Promise<void>
-): Promise<Consumer> {
+): Promise<Consumer | null> {
+  if (!kafkaAvailable) {
+    logger.warn({ groupId }, 'Kafka unavailable — consumer not started');
+    return null;
+  }
+
   const client = getKafkaClient();
   const consumer = client.consumer({ groupId });
-  
+
   await consumer.connect();
   logger.info({ groupId }, 'Kafka consumer connected');
-  
+
   for (const topic of topics) {
     await consumer.subscribe({ topic, fromBeginning: false });
   }
-  
+
   await consumer.run({
     eachMessage: async ({ topic, partition, message }) => {
       try {
@@ -145,23 +148,23 @@ export async function createConsumer(
       }
     },
   });
-  
+
   return consumer;
 }
 
-// ===========================================
-// CONNECTION HELPERS
-// ===========================================
-
 export async function disconnectKafka(): Promise<void> {
   if (producerInstance) {
-    await producerInstance.disconnect();
+    try {
+      await producerInstance.disconnect();
+    } catch { /* ignore */ }
     producerInstance = null;
+    kafkaAvailable = false;
     logger.info('Kafka producer disconnected');
   }
 }
 
 export async function checkKafkaHealth(): Promise<boolean> {
+  if (!kafkaAvailable) return false;
   try {
     const client = getKafkaClient();
     const admin = client.admin();
@@ -172,4 +175,8 @@ export async function checkKafkaHealth(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+export function isKafkaAvailable(): boolean {
+  return kafkaAvailable;
 }

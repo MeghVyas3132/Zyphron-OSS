@@ -162,19 +162,19 @@ The following matrix evaluates existing platforms across eleven capability dimen
 
 | Capability | Vercel | Netlify | Railway | Render | Fly.io | Heroku | Supabase | Firebase | App Runner | Cloud Run | DO App Platform | AWS/GCP/Azure |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Multi-service deployment | ✗ | ✗ | Partial | Partial | Partial | ✗ | ✗ | ✗ | ✗ | ✗ | Partial | Manual |
-| Background worker orchestration | ✗ | ✗ | Manual | Manual | Manual | Manual (Procfile) | ✗ | ✗ | ✗ | ✗ | Manual | Manual |
-| Infrastructure inference | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | N/A | N/A | ✗ | ✗ | ✗ | ✗ |
-| Runtime auto-detection | Partial | Partial | Partial | Partial | ✗ | Partial | N/A | N/A | Partial | ✗ | Partial | ✗ |
-| Cross-language deployment | Partial | ✗ | Yes | Yes | Yes | Yes | ✗ | ✗ | Yes | Yes | Yes | Yes |
-| Dependency-aware orchestration | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | N/A | N/A | ✗ | ✗ | ✗ | Manual/IaC |
-| Queue provisioning | ✗ | ✗ | ✗ | ✗ | ✗ | Add-on | ✗ | ✗ | ✗ | ✗ | ✗ | Manual |
-| DB provisioning | ✗ | ✗ | Add-on | Add-on | Partial | Add-on | Core | Core | ✗ | ✗ | Add-on | Manual |
-| BYOC support | ✗ | ✗ | Enterprise | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | Native |
-| Topology-aware deployments | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | N/A | N/A | ✗ | ✗ | ✗ | Manual/IaC |
-| Dockerfile-free | Yes | Yes | Partial | Partial | ✗ | Yes | N/A | N/A | Partial | ✗ | Partial | ✗ |
+| Multi-service deployment | [FAIL] | [FAIL] | Partial | Partial | Partial | [FAIL] | [FAIL] | [FAIL] | [FAIL] | [FAIL] | Partial | Manual |
+| Background worker orchestration | [FAIL] | [FAIL] | Manual | Manual | Manual | Manual (Procfile) | [FAIL] | [FAIL] | [FAIL] | [FAIL] | Manual | Manual |
+| Infrastructure inference | [FAIL] | [FAIL] | [FAIL] | [FAIL] | [FAIL] | [FAIL] | N/A | N/A | [FAIL] | [FAIL] | [FAIL] | [FAIL] |
+| Runtime auto-detection | Partial | Partial | Partial | Partial | [FAIL] | Partial | N/A | N/A | Partial | [FAIL] | Partial | [FAIL] |
+| Cross-language deployment | Partial | [FAIL] | Yes | Yes | Yes | Yes | [FAIL] | [FAIL] | Yes | Yes | Yes | Yes |
+| Dependency-aware orchestration | [FAIL] | [FAIL] | [FAIL] | [FAIL] | [FAIL] | [FAIL] | N/A | N/A | [FAIL] | [FAIL] | [FAIL] | Manual/IaC |
+| Queue provisioning | [FAIL] | [FAIL] | [FAIL] | [FAIL] | [FAIL] | Add-on | [FAIL] | [FAIL] | [FAIL] | [FAIL] | [FAIL] | Manual |
+| DB provisioning | [FAIL] | [FAIL] | Add-on | Add-on | Partial | Add-on | Core | Core | [FAIL] | [FAIL] | Add-on | Manual |
+| BYOC support | [FAIL] | [FAIL] | Enterprise | [FAIL] | [FAIL] | [FAIL] | [FAIL] | [FAIL] | [FAIL] | [FAIL] | [FAIL] | Native |
+| Topology-aware deployments | [FAIL] | [FAIL] | [FAIL] | [FAIL] | [FAIL] | [FAIL] | N/A | N/A | [FAIL] | [FAIL] | [FAIL] | Manual/IaC |
+| Dockerfile-free | Yes | Yes | Partial | Partial | [FAIL] | Yes | N/A | N/A | Partial | [FAIL] | Partial | [FAIL] |
 
-*Legend: ✗ = Not supported; Partial = Limited/manual configuration required; N/A = Not applicable to platform model*
+*Legend: [FAIL] = Not supported; Partial = Limited/manual configuration required; N/A = Not applicable to platform model*
 
 ---
 

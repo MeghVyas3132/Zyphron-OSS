@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { motion } from 'framer-motion';
 import { Plus, Search, MoreHorizontal, GitBranch, Globe, Clock, RefreshCw, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,25 +10,35 @@ import { formatRelativeTime } from '@/lib/utils';
 import { useProjects } from '@/hooks/use-projects';
 import type { Project } from '@/lib/api';
 
+const containerVariants = {
+  hidden: { opacity: 0 },
+  show: { opacity: 1, transition: { staggerChildren: 0.07 } },
+};
+
+const cardVariants = {
+  hidden: { opacity: 0, y: 18, scale: 0.98 },
+  show: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.5, ease: [0.19, 1, 0.22, 1] as const } },
+};
+
 const frameworkIcons: Record<string, string> = {
   nextjs: '▲',
-  react: '⚛️',
-  vue: '💚',
-  nuxt: '💚',
-  svelte: '🔥',
-  sveltekit: '🔥',
-  angular: '🔺',
-  express: '⚡',
-  fastify: '⚡',
-  nestjs: '🐱',
-  flask: '🐍',
-  django: '🐍',
-  fastapi: '🐍',
-  go: '🐹',
-  rust: '🦀',
-  static: '📄',
-  docker: '🐳',
-  unknown: '📦',
+  react: 'React',
+  vue: 'Vue',
+  nuxt: 'Vue',
+  svelte: 'Svelte',
+  sveltekit: 'Svelte',
+  angular: 'Angular',
+  express: 'Node',
+  fastify: 'Node',
+  nestjs: 'Nest',
+  flask: 'Python',
+  django: 'Python',
+  fastapi: 'Python',
+  go: 'Go',
+  rust: 'Rust',
+  static: 'Static',
+  docker: 'Docker',
+  unknown: 'Package',
 };
 
 export default function ProjectsPage() {
@@ -113,7 +124,12 @@ export default function ProjectsPage() {
 
       {/* Projects Grid */}
       {filteredProjects.length === 0 ? (
-        <div className="premium-panel text-center py-16 stagger-in animate-delay-2">
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="premium-panel text-center py-16"
+        >
           <p className="text-muted-foreground">
             {search ? 'No projects found matching your search' : 'No projects yet'}
           </p>
@@ -122,13 +138,20 @@ export default function ProjectsPage() {
               <Button className="mt-4">Create Your First Project</Button>
             </Link>
           )}
-        </div>
+        </motion.div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <motion.div
+          variants={containerVariants}
+          initial="hidden"
+          animate="show"
+          className="grid gap-4 md:grid-cols-2 lg:grid-cols-3"
+        >
           {filteredProjects.map((project) => (
-            <ProjectCard key={project.id} project={project} />
+            <motion.div key={project.id} variants={cardVariants}>
+              <ProjectCard project={project} />
+            </motion.div>
           ))}
-        </div>
+        </motion.div>
       )}
     </div>
   );
@@ -136,7 +159,7 @@ export default function ProjectsPage() {
 
 function ProjectCard({ project }: { project: Project }) {
   const framework = project.framework || 'unknown';
-  const frameworkIcon = frameworkIcons[framework] || '📦';
+  const frameworkIcon = frameworkIcons[framework] || 'Package';
   const frameworkAbbr = framework.toUpperCase().slice(0, 3);
 
   return (

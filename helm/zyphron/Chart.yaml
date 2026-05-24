@@ -1,0 +1,49 @@
+apiVersion: v2
+name: zyphron
+description: Zyphron — Universal Deployment Platform (college demo edition)
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+
+keywords:
+  - deployment
+  - platform
+  - kubernetes
+  - paas
+
+dependencies:
+  # PostgreSQL (Bitnami)
+  - name: postgresql
+    version: "15.5.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: postgresql.enabled
+
+  # Redis (Bitnami)
+  - name: redis
+    version: "19.6.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: redis.enabled
+
+  # Kafka (Bitnami)  — optional, graceful fallback to Redis queues
+  - name: kafka
+    version: "29.3.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: kafka.enabled
+
+  # kube-prometheus-stack — Grafana + Prometheus + Alertmanager
+  - name: kube-prometheus-stack
+    version: "61.x.x"
+    repository: "https://prometheus-community.github.io/helm-charts"
+    condition: monitoring.enabled
+
+  # Loki + Promtail — log aggregation
+  - name: loki-stack
+    version: "2.10.x"
+    repository: "https://grafana.github.io/helm-charts"
+    condition: monitoring.logsEnabled
+
+  # Traefik — ingress + load balancer + WebSocket proxy
+  - name: traefik
+    version: "28.x.x"
+    repository: "https://traefik.github.io/charts"
+    condition: traefik.enabled

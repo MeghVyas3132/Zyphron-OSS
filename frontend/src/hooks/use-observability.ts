@@ -80,8 +80,27 @@ async function obsApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
     },
     ...options,
   });
-  if (!response.ok) throw new Error('API request failed');
+  if (!response.ok) {
+    throw new Error(`Observability API request failed (${response.status})`);
+  }
   return response.json();
+}
+
+function rangeToMs(range: string): number {
+  switch (range) {
+    case '15m':
+      return 15 * 60 * 1000;
+    case '1h':
+      return 60 * 60 * 1000;
+    case '6h':
+      return 6 * 60 * 60 * 1000;
+    case '24h':
+      return 24 * 60 * 60 * 1000;
+    case '7d':
+      return 7 * 24 * 60 * 60 * 1000;
+    default:
+      return 60 * 60 * 1000;
+  }
 }
 
 // ===========================================
@@ -110,13 +129,28 @@ export function useMetrics(params: { projectId: string; range?: string; period?:
       params.range || params.period,
     ],
     queryFn: async () => {
-      const searchParams = new URLSearchParams();
-      const range = params.range || params.period;
-      if (range) searchParams.set('range', range);
-      const data = await obsApi<{ metrics: DeploymentMetrics[] }>(
-        `/projects/${params.projectId}/metrics?${searchParams.toString()}`
+      const range = params.range || params.period || '1h';
+      const endTime = new Date();
+      const startTime = new Date(endTime.getTime() - rangeToMs(range));
+      const searchParams = new URLSearchParams({
+        name: 'requests_total',
+        startTime: startTime.toISOString(),
+        endTime: endTime.toISOString(),
+      });
+      const data = await obsApi<{ metrics: Array<{ timestamp: string; value: number }> }>(
+        `/metrics/query?${searchParams.toString()}`
       );
-      return data.metrics;
+      return (data.metrics || []).map((point) => ({
+        requests: point.value,
+        errors: 0,
+        latencyP50: 0,
+        latencyP95: 0,
+        latencyP99: 0,
+        cpuUsage: 0,
+        memoryUsage: 0,
+        networkIn: 0,
+        networkOut: 0,
+      }));
     },
     enabled: !!params.projectId,
     refetchInterval: 30000,
@@ -130,10 +164,21 @@ export function useTraces(params: { projectId: string; limit?: number }) {
     queryFn: async () => {
       const searchParams = new URLSearchParams();
       if (params.limit) searchParams.set('limit', String(params.limit));
-      const data = await obsApi<{ traces: Trace[] }>(
-        `/projects/${params.projectId}/traces?${searchParams.toString()}`
+      const data = await obsApi<{ traces: Array<Trace | Record<string, unknown> | Array<Record<string, unknown>>> }>(
+        `/traces?${searchParams.toString()}`
       );
-      return data.traces;
+      const flattened = (data.traces || []).flatMap((trace) => (Array.isArray(trace) ? trace : [trace]));
+      return flattened.map((trace, index) => {
+        const row = trace as Record<string, unknown>;
+        return {
+          id: String(row.id || row.traceId || `trace-${index}`),
+          service: String(row.service || row.serviceName || 'unknown'),
+          operation: String(row.operation || row.operationName || row.name || 'operation'),
+          duration: Number(row.duration || 0),
+          status: String(row.status || 'ok'),
+          timestamp: String(row.timestamp || row.startTime || new Date().toISOString()),
+        } satisfies Trace;
+      });
     },
     enabled: !!params.projectId,
   });

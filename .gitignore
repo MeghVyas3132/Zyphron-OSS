@@ -48,3 +48,11 @@ coverage/
 # Docker
 Dockerfile.dev
 docker-compose.override.yml
+
+# Next.js build output
+frontend/.next/
+
+# Playwright
+frontend/playwright-report/
+frontend/test-results/
+test-results/

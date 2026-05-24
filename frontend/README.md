@@ -4,13 +4,13 @@ Modern cloud deployment platform frontend built with Next.js 14, TypeScript, and
 
 ## Features
 
-- 🚀 **Next.js 14** with App Router
-- 📝 **TypeScript** for type safety
-- 🎨 **Tailwind CSS** for styling
-- 🌙 **Dark Mode** support with next-themes
-- 📊 **React Query** for server state management
-- 🔐 **Authentication** with JWT
-- 📱 **Responsive** design
+- Launch **Next.js 14** with App Router
+- Notes **TypeScript** for type safety
+- Design **Tailwind CSS** for styling
+- Theme **Dark Mode** support with next-themes
+- Data **React Query** for server state management
+- Auth **Authentication** with JWT
+- Responsive **Responsive** design
 
 ## Getting Started
 

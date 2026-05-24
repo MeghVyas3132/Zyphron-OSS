@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { PageTransition } from '@/components/animated/page-transition';
 
 export default function AuthLayout({
   children,
@@ -51,6 +52,11 @@ export default function AuthLayout({
 
   return (
     <div className="min-h-screen premium-shell grid lg:grid-cols-[1.2fr_1fr]">
+      <div className="ambient-layer">
+        <div className="ambient-orb ambient-orb-a" />
+        <div className="ambient-orb ambient-orb-b" />
+        <div className="ambient-orb ambient-orb-c" />
+      </div>
       <section className="hidden lg:flex p-12 xl:p-16 relative overflow-hidden">
         <div className="absolute inset-0 opacity-30 bg-[radial-gradient(circle_at_20%_20%,hsl(var(--foreground)/0.15),transparent_40%)]" />
         <div className="relative w-full premium-panel p-10 flex flex-col justify-between stagger-in">
@@ -83,7 +89,7 @@ export default function AuthLayout({
       </section>
 
       <section className="flex items-center justify-center p-6 sm:p-10 lg:p-14">
-        <div className="w-full max-w-md premium-panel p-7 sm:p-8 stagger-in">{children}</div>
+        <PageTransition className="w-full max-w-md premium-panel p-7 sm:p-8 stagger-in">{children}</PageTransition>
       </section>
     </div>
   );

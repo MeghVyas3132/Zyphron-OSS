@@ -65,14 +65,17 @@ export class DeployerService {
   private docker: Docker;
   private network: string;
   private domain: string;
+  private useHttps: boolean;
 
   constructor(
     network: string = 'zyphron-network',
-    domain: string = 'localhost'
+    domain: string = 'localhost',
+    useHttps: boolean = false
   ) {
     this.docker = new Docker();
     this.network = network;
     this.domain = domain;
+    this.useHttps = useHttps;
   }
 
   // ===========================================
@@ -152,12 +155,27 @@ export class DeployerService {
           'zyphron.project.id': projectId,
           'zyphron.project.slug': projectSlug,
           'zyphron.deployment.id': deploymentId,
-          // Traefik labels for reverse proxy
+          // Traefik labels — HTTP + optional HTTPS with Let's Encrypt
           'traefik.enable': 'true',
-          [`traefik.http.routers.${containerName}.rule`]: `Host(\`${projectSlug}.${this.domain}\`)`,
-          [`traefik.http.routers.${containerName}.entrypoints`]: 'web',
-          [`traefik.http.routers.${containerName}.service`]: containerName,
+          // HTTP router (always present — redirects to HTTPS in prod)
+          [`traefik.http.routers.${containerName}-http.rule`]: `Host(\`${projectSlug}.${this.domain}\`)`,
+          [`traefik.http.routers.${containerName}-http.entrypoints`]: 'web',
+          [`traefik.http.routers.${containerName}-http.service`]: containerName,
+          ...(this.useHttps ? {
+            // Redirect HTTP → HTTPS
+            [`traefik.http.routers.${containerName}-http.middlewares`]: 'https-redirect@docker',
+            // HTTPS router with Let's Encrypt
+            [`traefik.http.routers.${containerName}.rule`]: `Host(\`${projectSlug}.${this.domain}\`)`,
+            [`traefik.http.routers.${containerName}.entrypoints`]: 'websecure',
+            [`traefik.http.routers.${containerName}.tls`]: 'true',
+            [`traefik.http.routers.${containerName}.tls.certresolver`]: 'letsencrypt',
+            [`traefik.http.routers.${containerName}.service`]: containerName,
+          } : {}),
           [`traefik.http.services.${containerName}.loadbalancer.server.port`]: port.toString(),
+          // Health check via Traefik
+          [`traefik.http.services.${containerName}.loadbalancer.healthcheck.path`]: '/health',
+          [`traefik.http.services.${containerName}.loadbalancer.healthcheck.interval`]: '10s',
+          [`traefik.http.services.${containerName}.loadbalancer.healthcheck.timeout`]: '3s',
         },
       });
 
@@ -169,7 +187,8 @@ export class DeployerService {
       const assignedPort = this.getAssignedPort(containerInfo, port);
 
       const internalUrl = `http://${containerName}:${port}`;
-      const externalUrl = `http://${projectSlug}.${this.domain}`;
+      const protocol = this.useHttps ? 'https' : 'http';
+      const externalUrl = `${protocol}://${projectSlug}.${this.domain}`;
 
       logger.info({
         deploymentId,
@@ -578,9 +597,9 @@ export class DeployerService {
 
 let deployerServiceInstance: DeployerService | null = null;
 
-export function getDeployerService(network?: string, domain?: string): DeployerService {
+export function getDeployerService(network?: string, domain?: string, useHttps?: boolean): DeployerService {
   if (!deployerServiceInstance) {
-    deployerServiceInstance = new DeployerService(network, domain);
+    deployerServiceInstance = new DeployerService(network, domain, useHttps);
   }
   return deployerServiceInstance;
 }

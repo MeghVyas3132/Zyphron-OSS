@@ -14,8 +14,10 @@ import { detectProject } from './services/detector/index.js';
 import { getGitService } from './services/git/index.js';
 import { getBuilderService } from './services/builder/index.js';
 import { getDeployerService } from './services/deployer/index.js';
+import { k8sDeploy, k8sDelete } from './services/deployer/k8s.js';
 import { getBuildLogPublisher } from './routes/ws.js';
 import { getGitHubToken } from './lib/github-token.js';
+import { emailService } from './services/email/index.js';
 
 // Multi-service deployment
 import { getMultiServiceDetector, MultiServiceConfig } from './services/detector/multi-service.js';
@@ -23,22 +25,36 @@ import { ParallelMultiServiceDeployer } from './services/deployer/parallel.js';
 
 const logger = createLogger('worker');
 
-// Store consumers for cleanup
-const consumers: Consumer[] = [];
+// ---------------------------------------------------------------
+// DEPLOYMENT MODE: 'k8s' (K3s/EKS) or 'docker' (local dev)
+// Set DEPLOYMENT_MODE=k8s in production / demo environment
+// ---------------------------------------------------------------
+const DEPLOYMENT_MODE = (process.env.DEPLOYMENT_MODE ?? 'docker') as 'k8s' | 'docker';
+logger.info({ mode: DEPLOYMENT_MODE }, 'Deployer mode');
+
+// Store consumers for cleanup (nullable because Kafka is optional)
+const consumers: (Consumer | null)[] = [];
 
 // Initialize services
-const gitService = getGitService('/tmp/zyphron/repos');
+const gitService = getGitService(config.deployment.projectsDir || '/tmp/zyphron/repos');
 const builderService = getBuilderService(config.docker.registry || 'localhost:5000');
-const deployerService = getDeployerService('zyphron-network', config.deployment.baseDomain || 'localhost');
+const deployerService = getDeployerService(
+  'zyphron-network',
+  config.deployment.baseDomain || 'localhost',
+  config.deployment.useHttps
+);
 const logPublisher = getBuildLogPublisher();
 
-// Multi-service deployer
+// Multi-service deployer (Docker mode only)
 const multiServiceDetector = getMultiServiceDetector();
 const parallelDeployer = new ParallelMultiServiceDeployer(
   'zyphron-network',
   config.deployment.baseDomain || 'localhost',
   config.docker.registry || 'localhost:5000'
 );
+
+// Suppress unused-in-docker-mode warnings
+void k8sDelete;
 
 // ===========================================
 // DEPLOYMENT EVENT HANDLER
@@ -198,7 +214,7 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
 
   // Publish initial status
   await logPublisher.publishStatus(deploymentId, { status: 'BUILDING', message: 'Starting build...' });
-  await publishLog('🚀 Deployment started', 'info', 'init', 0);
+  await publishLog('Launch Deployment started', 'info', 'init', 0);
 
   // Update deployment status to BUILDING
   await prisma.deployment.update({
@@ -222,7 +238,7 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
   });
 
   if (!project) {
-    await publishLog(`❌ Project ${projectId} not found`, 'error');
+    await publishLog(`Error Project ${projectId} not found`, 'error');
     throw new Error(`Project ${projectId} not found`);
   }
 
@@ -238,7 +254,7 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
     // =============================================
     // STEP 1: Clone Repository
     // =============================================
-    await publishLog(`📦 Cloning repository: ${project.repositoryUrl}`, 'info', 'clone', 10);
+    await publishLog(`Package Cloning repository: ${project.repositoryUrl}`, 'info', 'clone', 10);
     logger.info({ deploymentId, repoUrl: project.repositoryUrl }, 'Cloning repository');
 
     const gitToken = project.repositoryProvider === 'GITHUB'
@@ -253,11 +269,11 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
     );
 
     if (!cloneResult.success) {
-      await publishLog(`❌ Failed to clone: ${cloneResult.error}`, 'error', 'clone');
+      await publishLog(`Error Failed to clone: ${cloneResult.error}`, 'error', 'clone');
       throw new Error(`Failed to clone repository: ${cloneResult.error}`);
     }
 
-    await publishLog(`✅ Cloned commit ${cloneResult.commitHash.substring(0, 7)} (${cloneResult.branch})`, 'info', 'clone', 20);
+    await publishLog(`Success Cloned commit ${cloneResult.commitHash.substring(0, 7)} (${cloneResult.branch})`, 'info', 'clone', 20);
 
     logger.info({
       deploymentId,
@@ -280,7 +296,7 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
     // =============================================
     // STEP 2: Detect Multi-Service Project
     // =============================================
-    await publishLog('🔍 Analyzing project structure...', 'info', 'detect', 22);
+    await publishLog('Detect Analyzing project structure...', 'info', 'detect', 22);
     
     const multiServiceConfig = await multiServiceDetector.detect(cloneResult.path);
     
@@ -308,12 +324,12 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
     // =============================================
     // STEP 3: Detect Project Framework (Single Service)
     // =============================================
-    await publishLog('🔍 Detecting project framework...', 'info', 'detect', 25);
+    await publishLog('Detect Detecting project framework...', 'info', 'detect', 25);
     logger.info({ deploymentId }, 'Detecting project framework');
 
     const detection = await detectProject(cloneResult.path);
 
-    await publishLog(`✅ Detected: ${detection.framework} (${detection.language}) - confidence: ${detection.confidence}%`, 'info', 'detect', 30);
+    await publishLog(`Success Detected: ${detection.framework} (${detection.language}) - confidence: ${detection.confidence}%`, 'info', 'detect', 30);
 
     logger.info({
       deploymentId,
@@ -326,7 +342,7 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
     // =============================================
     // STEP 3: Build Docker Image
     // =============================================
-    await publishLog(`🔨 Building Docker image for ${detection.framework}...`, 'info', 'build', 35);
+    await publishLog(`Build Building Docker image for ${detection.framework}...`, 'info', 'build', 35);
     logger.info({ deploymentId, framework: detection.framework }, 'Building Docker image');
     await assertDeploymentActive(deploymentId);
 
@@ -345,7 +361,7 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
     });
 
     if (!buildResult.success) {
-      await publishLog(`❌ Build failed: ${buildResult.error}`, 'error', 'build');
+      await publishLog(`Error Build failed: ${buildResult.error}`, 'error', 'build');
       // Update deployment with build logs before failing
       await prisma.deployment.update({
         where: { id: deploymentId },
@@ -356,7 +372,7 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
       throw new Error(`Build failed: ${buildResult.error}`);
     }
 
-    await publishLog(`✅ Build completed in ${Math.round(buildResult.duration / 1000)}s`, 'info', 'build', 70);
+    await publishLog(`Success Build completed in ${Math.round(buildResult.duration / 1000)}s`, 'info', 'build', 70);
 
     logger.info({
       deploymentId,
@@ -378,7 +394,7 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
     // =============================================
     // STEP 4: Push Image to Registry
     // =============================================
-    await publishLog('📤 Pushing image to registry...', 'info', 'push', 75);
+    await publishLog('Push Pushing image to registry...', 'info', 'push', 75);
     logger.info({ deploymentId }, 'Pushing image to registry');
 
     const pushResult = await builderService.pushImage(
@@ -387,17 +403,17 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
     );
 
     if (!pushResult.success) {
-      await publishLog(`⚠️ Push failed, using local image: ${pushResult.error}`, 'warn', 'push');
+      await publishLog(`[WARN] Push failed, using local image: ${pushResult.error}`, 'warn', 'push');
       logger.warn({ deploymentId, error: pushResult.error }, 'Failed to push image, continuing with local image');
     } else {
-      await publishLog('✅ Image pushed to registry', 'info', 'push', 80);
+      await publishLog('Success Image pushed to registry', 'info', 'push', 80);
     }
     await assertDeploymentActive(deploymentId);
 
     // =============================================
     // STEP 5: Deploy Container
     // =============================================
-    await publishLog('🚢 Deploying container...', 'info', 'deploy', 85);
+    await publishLog('Deploy Deploying container...', 'info', 'deploy', 85);
     await logPublisher.publishStatus(deploymentId, { status: 'DEPLOYING', message: 'Starting container...' });
     
     await prisma.deployment.update({
@@ -408,43 +424,69 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
     logger.info({ deploymentId }, 'Deploying container');
 
     const deployStartTime = Date.now();
-    const deployResult = await deployerService.deploy({
-      deploymentId,
-      projectId,
-      projectSlug: project.slug,
-      imageName: buildResult.imageName,
-      imageTag: buildResult.imageTag,
-      envVars,
-      port: detection.port,
-      detection,
-      healthCheck: {
-        path: '/health',
-        interval: 30,
-        timeout: 10,
-        retries: 3,
-        startPeriod: 60,
-      },
-    });
+
+    // -------------------------------------------------------------------
+    // DEPLOY: K8s (production/demo) or Docker (local dev)
+    // -------------------------------------------------------------------
+    let deployResult: { success: boolean; internalUrl?: string; externalUrl?: string; error?: string; containerId?: string };
+
+    if (DEPLOYMENT_MODE === 'k8s') {
+      // Detect sidecar needs from environment
+      const hasCelery = Object.keys(envVars).some(k => k.includes('CELERY'));
+      const hasKafka  = !envVars['KAFKA_BROKERS'];  // inject if not already provided
+      const hasRedis  = !envVars['REDIS_URL'];
+
+      const r = await k8sDeploy({
+        deploymentId,
+        projectId,
+        projectSlug: project.slug,
+        imageName: `${buildResult.imageName}:${buildResult.imageTag}`,
+        envVars,
+        port: detection.port,
+        memory: project.memoryLimit ?? '512Mi',
+        cpu: project.cpuLimit ?? '0.5',
+        hasCelery,
+        hasKafka,
+        hasRedis,
+        supportsWebSockets: detection.framework !== 'static',
+      });
+      deployResult = { ...r, containerId: undefined };
+    } else {
+      const r = await deployerService.deploy({
+        deploymentId,
+        projectId,
+        projectSlug: project.slug,
+        imageName: buildResult.imageName,
+        imageTag: buildResult.imageTag,
+        envVars,
+        port: detection.port,
+        detection,
+        healthCheck: { path: '/health', interval: 30, timeout: 10, retries: 3, startPeriod: 60 },
+      });
+      deployResult = r;
+    }
+
     const deployDuration = Math.round((Date.now() - deployStartTime) / 1000);
 
     if (!deployResult.success) {
-      await publishLog(`❌ Deployment failed: ${deployResult.error}`, 'error', 'deploy');
+      await publishLog(`Error Deployment failed: ${deployResult.error}`, 'error', 'deploy');
       throw new Error(`Deployment failed: ${deployResult.error}`);
     }
 
-    await publishLog(`✅ Container deployed in ${deployDuration}s`, 'info', 'deploy', 95);
+    await publishLog(`Success Container deployed in ${deployDuration}s`, 'info', 'deploy', 95);
 
     logger.info({
       deploymentId,
+      mode: DEPLOYMENT_MODE,
       containerId: deployResult.containerId,
       internalUrl: deployResult.internalUrl,
       externalUrl: deployResult.externalUrl,
-    }, 'Container deployed successfully');
+    }, 'Deployed successfully');
 
     // =============================================
     // STEP 6: Cleanup and Finalize
     // =============================================
-    await publishLog('🧹 Cleaning up...', 'info', 'cleanup', 98);
+    await publishLog('Cleanup Cleaning up...', 'info', 'cleanup', 98);
 
     // Cleanup cloned repository
     await gitService.cleanup(deploymentId);
@@ -462,10 +504,12 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
         deployDuration,
         metadata: {
           containerId: deployResult.containerId,
-          containerName: deployResult.containerName,
+          // containerName / port only present in Docker mode
+          ...('containerName' in deployResult ? { containerName: (deployResult as { containerName?: string }).containerName } : {}),
+          ...('port' in deployResult ? { port: (deployResult as { port?: number }).port } : {}),
           internalUrl: deployResult.internalUrl,
           externalUrl: deployResult.externalUrl,
-          port: deployResult.port,
+          mode: DEPLOYMENT_MODE,
           framework: detection.framework,
           language: detection.language,
         },
@@ -477,9 +521,39 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
     });
 
     const totalDuration = Date.now() - startTime;
-    
+    const buildDurationStr = `${Math.round(totalDuration / 1000)}s`;
+
+    // =============================================
+    // STEP 7: Post-deploy health verification + auto-rollback
+    // =============================================
+    await publishLog('Verify Verifying deployment health...', 'info', 'verify', 97);
+    const isHealthy = await verifyDeploymentHealth(deployResult.externalUrl, 60, 3);
+
+    if (!isHealthy) {
+      // Auto-rollback to previous live deployment
+      await publishLog('Error Health check failed — initiating auto-rollback', 'error', 'rollback');
+      const rolledBack = await attemptRollback(deploymentId, projectId, project.slug, publishLog);
+      const rollbackReason = 'Health check failed after deployment';
+
+      // Notify user
+      const owner = await prisma.user.findUnique({ where: { id: project.userId }, select: { email: true, name: true } });
+      if (owner) {
+        void emailService.sendRollback(owner.email, owner.name || 'there', project.name, rollbackReason, deploymentId);
+      }
+
+      await prisma.deployment.update({
+        where: { id: deploymentId },
+        data: { status: 'FAILED', completedAt: new Date(), errorMessage: rollbackReason },
+      });
+
+      if (!rolledBack) {
+        await publishLog('Warn Could not rollback — no previous healthy deployment found', 'warn', 'rollback');
+      }
+      return;
+    }
+
     // Final success messages
-    await publishLog(`🎉 Deployment complete! URL: ${deployResult.externalUrl}`, 'info', 'complete', 100);
+    await publishLog(`Done Deployment complete! URL: ${deployResult.externalUrl}`, 'info', 'complete', 100);
     await logPublisher.publishStatus(deploymentId, {
       status: 'LIVE',
       message: 'Deployment successful',
@@ -489,9 +563,18 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
     await logPublisher.publishProjectEvent(projectId, {
       type: 'deployment_completed',
       deploymentId,
-      message: `Deployment completed in ${Math.round(totalDuration / 1000)}s`,
+      message: `Deployment completed in ${buildDurationStr}`,
       metadata: { url: deployResult.externalUrl },
     });
+
+    // Email success notification
+    const owner = await prisma.user.findUnique({ where: { id: project.userId }, select: { email: true, name: true } });
+    if (owner) {
+      void emailService.sendDeploymentSuccess(
+        owner.email, owner.name || 'there', project.name,
+        deployResult.externalUrl || '', buildDurationStr
+      );
+    }
 
     logger.info({
       deploymentId,
@@ -562,10 +645,103 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
       },
     });
 
-    // Cleanup cloned repository on failure
-    await gitService.cleanup(deploymentId);
+    // Email failure notification with AI suggestion placeholder
+    try {
+      const proj = await prisma.project.findUnique({ where: { id: projectId ?? '' }, select: { name: true, userId: true } });
+      if (proj) {
+        const owner = await prisma.user.findUnique({ where: { id: proj.userId }, select: { email: true, name: true } });
+        if (owner) {
+          void emailService.sendDeploymentFailed(
+            owner.email, owner.name || 'there', proj.name,
+            errorMessage.slice(0, 500), '',
+            deploymentId ?? ''
+          );
+        }
+      }
+    } catch { /* non-fatal */ }
 
-    throw error; // Re-throw to be handled by parent
+    // Cleanup cloned repository on failure
+    await gitService.cleanup(deploymentId ?? '');
+
+    throw error;
+  }
+}
+
+// ===========================================
+// HEALTH CHECK — polls URL until healthy or timeout
+// ===========================================
+
+async function verifyDeploymentHealth(
+  url: string | undefined,
+  timeoutSeconds: number,
+  minSuccesses: number
+): Promise<boolean> {
+  if (!url) return true; // No URL = skip check
+
+  const deadline = Date.now() + timeoutSeconds * 1000;
+  let successes = 0;
+
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+      if (res.ok || res.status < 500) {
+        successes++;
+        if (successes >= minSuccesses) return true;
+      }
+    } catch { /* ignore */ }
+    await new Promise((r) => setTimeout(r, 5000));
+  }
+
+  return successes >= minSuccesses;
+}
+
+// ===========================================
+// AUTO-ROLLBACK — redeploys last known good image
+// ===========================================
+
+async function attemptRollback(
+  currentDeploymentId: string,
+  projectId: string,
+  projectSlug: string,
+  publishLog: (msg: string, level?: 'info' | 'warn' | 'error', step?: string) => Promise<void>
+): Promise<boolean> {
+  try {
+    // Find the last LIVE deployment before this one
+    const previous = await prisma.deployment.findFirst({
+      where: {
+        projectId,
+        id: { not: currentDeploymentId },
+        status: 'LIVE',
+        imageTag: { not: null },
+      },
+      orderBy: { completedAt: 'desc' },
+    });
+
+    if (!previous?.imageTag) {
+      logger.warn({ projectId }, 'No previous live deployment to rollback to');
+      return false;
+    }
+
+    await publishLog(`Rollback Deploying previous image: ${previous.imageTag}`, 'info', 'rollback');
+
+    const [imageName, imageTag] = previous.imageTag.split(':');
+    const result = await deployerService.deploy({
+      deploymentId: currentDeploymentId + '-rb',
+      projectId,
+      projectSlug,
+      imageName,
+      imageTag: imageTag || 'latest',
+    });
+
+    if (result.success) {
+      await publishLog(`Rollback Rollback successful: ${result.externalUrl}`, 'info', 'rollback');
+      logger.info({ projectId, previousId: previous.id }, 'Auto-rollback successful');
+    }
+
+    return result.success;
+  } catch (error) {
+    logger.error({ error, projectId }, 'Auto-rollback failed');
+    return false;
   }
 }
 
@@ -698,7 +874,7 @@ async function handleMultiServiceDeployment(
   }, 'Starting multi-service deployment');
 
   await publishLog(
-    `🎯 Detected multi-service project (${multiServiceConfig.detectionSource}): ${multiServiceConfig.services.length} app services, ${multiServiceConfig.managedServices.length} managed services`,
+    `Detected Detected multi-service project (${multiServiceConfig.detectionSource}): ${multiServiceConfig.services.length} app services, ${multiServiceConfig.managedServices.length} managed services`,
     'info',
     'detect',
     25
@@ -716,47 +892,47 @@ async function handleMultiServiceDeployment(
   // List all detected services
   for (const service of multiServiceConfig.services) {
     await publishLog(
-      `  📦 ${service.name} (${service.type}) - port ${service.port || 'auto'}${service.dependsOn?.length ? ` → depends on: ${service.dependsOn.join(', ')}` : ''}`,
+      `  Package ${service.name} (${service.type}) - port ${service.port || 'auto'}${service.dependsOn?.length ? ` → depends on: ${service.dependsOn.join(', ')}` : ''}`,
       'info',
       'detect'
     );
   }
 
   for (const managed of multiServiceConfig.managedServices) {
-    await publishLog(`  🗄️ ${managed.name} (${managed.type})`, 'info', 'detect');
+    await publishLog(`  DB ${managed.name} (${managed.type})`, 'info', 'detect');
   }
 
   // Set up parallel deployer event listeners
   // Events emit objects with known properties
   parallelDeployer.on('phase', async (...args: unknown[]) => {
     const data = args[0] as { phase: string; message: string };
-    await publishLog(`📍 ${data.message}`, 'info', data.phase);
+    await publishLog(`Info ${data.message}`, 'info', data.phase);
   });
 
   parallelDeployer.on('service:build:start', async (...args: unknown[]) => {
     const data = args[0] as { service: string };
-    await publishLog(`🔨 Building ${data.service}...`, 'info', 'build');
+    await publishLog(`Build Building ${data.service}...`, 'info', 'build');
   });
 
   parallelDeployer.on('service:build:complete', async (...args: unknown[]) => {
     const data = args[0] as { service: string; duration: number };
-    await publishLog(`✅ ${data.service} built in ${Math.round(data.duration / 1000)}s`, 'info', 'build');
+    await publishLog(`Success ${data.service} built in ${Math.round(data.duration / 1000)}s`, 'info', 'build');
   });
 
   parallelDeployer.on('service:build:failed', async (...args: unknown[]) => {
     const data = args[0] as { service: string; error: string };
-    await publishLog(`❌ ${data.service} build failed: ${data.error}`, 'error', 'build');
+    await publishLog(`Error ${data.service} build failed: ${data.error}`, 'error', 'build');
   });
 
   parallelDeployer.on('service:deploy:start', async (...args: unknown[]) => {
     const data = args[0] as { service: string };
-    await publishLog(`🚢 Deploying ${data.service}...`, 'info', 'deploy');
+    await publishLog(`Deploy Deploying ${data.service}...`, 'info', 'deploy');
   });
 
   parallelDeployer.on('service:deploy:complete', async (...args: unknown[]) => {
     const data = args[0] as { service: string; externalUrl?: string };
     await publishLog(
-      `✅ ${data.service} deployed${data.externalUrl ? `: ${data.externalUrl}` : ''}`,
+      `Success ${data.service} deployed${data.externalUrl ? `: ${data.externalUrl}` : ''}`,
       'info',
       'deploy'
     );
@@ -764,11 +940,11 @@ async function handleMultiServiceDeployment(
 
   parallelDeployer.on('service:deploy:failed', async (...args: unknown[]) => {
     const data = args[0] as { service: string; error: string };
-    await publishLog(`❌ ${data.service} deploy failed: ${data.error}`, 'error', 'deploy');
+    await publishLog(`Error ${data.service} deploy failed: ${data.error}`, 'error', 'deploy');
   });
 
   // Execute parallel deployment
-  await publishLog('🚀 Starting parallel deployment...', 'info', 'deploy', 30);
+  await publishLog('Launch Starting parallel deployment...', 'info', 'deploy', 30);
   await logPublisher.publishStatus(deploymentId, {
     status: 'BUILDING',
     message: 'Building services in parallel...',
@@ -870,7 +1046,7 @@ async function handleMultiServiceDeployment(
 
     // Success messages
     await publishLog(
-      `🎉 Multi-service deployment complete! ${result.services.length} services deployed in ${Math.round(totalDuration / 1000)}s`,
+      `Done Multi-service deployment complete! ${result.services.length} services deployed in ${Math.round(totalDuration / 1000)}s`,
       'info',
       'complete',
       100
@@ -879,9 +1055,9 @@ async function handleMultiServiceDeployment(
     // Log all service URLs
     for (const service of result.services) {
       if (service.externalUrl) {
-        await publishLog(`  🌐 ${service.name}: ${service.externalUrl}`, 'info', 'complete');
+        await publishLog(`  Net ${service.name}: ${service.externalUrl}`, 'info', 'complete');
       } else if (service.internalUrl) {
-        await publishLog(`  🔒 ${service.name}: ${service.internalUrl} (internal)`, 'info', 'complete');
+        await publishLog(`  Internal ${service.name}: ${service.internalUrl} (internal)`, 'info', 'complete');
       }
     }
 
@@ -1177,7 +1353,7 @@ async function handleDeploymentRollback(event: DeploymentEvent): Promise<void> {
       data: { status: 'COMPLETED', completedAt: new Date(), error: null },
     });
 
-    await publishLog(`✅ Rollback complete in ${(duration / 1000).toFixed(2)}s`, 'info', 'complete', 100);
+    await publishLog(`Success Rollback complete in ${(duration / 1000).toFixed(2)}s`, 'info', 'complete', 100);
     await logPublisher.publishStatus(deploymentId, { status: 'LIVE', message: 'Rollback complete!' });
     await logPublisher.publishComplete(deploymentId, {
       status: 'success',
@@ -1196,7 +1372,7 @@ async function handleDeploymentRollback(event: DeploymentEvent): Promise<void> {
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     
-    await publishLog(`❌ Rollback failed: ${errorMessage}`, 'error', 'error', 100);
+    await publishLog(`Error Rollback failed: ${errorMessage}`, 'error', 'error', 100);
     await logPublisher.publishStatus(deploymentId, { status: 'FAILED', message: errorMessage });
     await logPublisher.publishComplete(deploymentId, {
       status: 'failed',
@@ -1262,9 +1438,9 @@ async function gracefulShutdown(signal: string): Promise<void> {
   }, 30000);
 
   try {
-    // Disconnect consumers
+    // Disconnect consumers (filter nulls — Kafka may be disabled)
     for (const consumer of consumers) {
-      await consumer.disconnect();
+      if (consumer) await consumer.disconnect();
     }
     logger.info('Kafka consumers disconnected');
 

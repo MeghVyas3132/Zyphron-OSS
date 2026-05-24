@@ -1,0 +1,249 @@
+# =============================================================
+# Zyphron Helm Values — defaults (development)
+# Override with values.aws.yaml or values.oracle.yaml
+# =============================================================
+
+global:
+  domain: "localhost"
+  registry: "localhost:5000"
+  imageTag: "latest"
+  storageClass: ""   # "" = cluster default
+
+# =============================================================
+# Zyphron API
+# =============================================================
+api:
+  replicaCount: 1
+  image:
+    repository: "zyphron/api"
+    tag: ""           # defaults to global.imageTag
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 3000
+  resources:
+    requests: { memory: "256Mi", cpu: "100m" }
+    limits:   { memory: "512Mi", cpu: "500m" }
+  env:
+    NODE_ENV: production
+    LOG_LEVEL: info
+    DEPLOYMENT_MODE: k8s
+    USE_HTTPS: "false"
+    MAX_CONCURRENT_BUILDS: "5"
+  secrets: {}
+  # IMPORTANT: override these in values.aws.yaml
+  # JWT_SECRET, DATABASE_URL, REDIS_URL, KAFKA_BROKERS, RESEND_API_KEY, GROQ_API_KEYS
+
+# =============================================================
+# Zyphron Worker
+# =============================================================
+worker:
+  replicaCount: 2           # 2 workers = 10 concurrent builds total
+  image:
+    repository: "zyphron/worker"
+    tag: ""
+    pullPolicy: IfNotPresent
+  resources:
+    requests: { memory: "512Mi", cpu: "250m" }
+    limits:   { memory: "1Gi",   cpu: "1000m" }
+  env:
+    NODE_ENV: production
+    DEPLOYMENT_MODE: k8s
+    LOG_LEVEL: info
+  # Worker needs RBAC to create namespaces + deployments for user projects
+  rbac:
+    create: true
+
+# =============================================================
+# Zyphron Frontend
+# =============================================================
+frontend:
+  replicaCount: 1
+  image:
+    repository: "zyphron/frontend"
+    tag: ""
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 3000
+  resources:
+    requests: { memory: "128Mi", cpu: "50m" }
+    limits:   { memory: "256Mi", cpu: "250m" }
+  env:
+    NODE_ENV: production
+
+# =============================================================
+# Container Registry (local — use ECR in prod)
+# =============================================================
+registry:
+  enabled: true
+  storage: "20Gi"
+
+# =============================================================
+# PostgreSQL (Bitnami)
+# =============================================================
+postgresql:
+  enabled: true
+  auth:
+    username: zyphron
+    password: ""        # auto-generated via secret
+    database: zyphron
+  primary:
+    resources:
+      requests: { memory: "256Mi", cpu: "100m" }
+      limits:   { memory: "512Mi", cpu: "500m" }
+    persistence:
+      enabled: true
+      size: "20Gi"
+
+# =============================================================
+# Redis (Bitnami)
+# =============================================================
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: false   # internal cluster only
+  master:
+    resources:
+      requests: { memory: "64Mi",  cpu: "50m" }
+      limits:   { memory: "256Mi", cpu: "250m" }
+    persistence:
+      enabled: true
+      size: "2Gi"
+
+# =============================================================
+# Kafka (Bitnami) — optional, disables gracefully
+# =============================================================
+kafka:
+  enabled: true
+  replicaCount: 1
+  resources:
+    requests: { memory: "512Mi", cpu: "250m" }
+    limits:   { memory: "1Gi",   cpu: "1000m" }
+  persistence:
+    enabled: true
+    size: "10Gi"
+  zookeeper:
+    replicaCount: 1
+    resources:
+      requests: { memory: "256Mi", cpu: "100m" }
+      limits:   { memory: "512Mi", cpu: "500m" }
+
+# =============================================================
+# Monitoring — kube-prometheus-stack + Loki
+# =============================================================
+monitoring:
+  enabled: true
+  logsEnabled: true
+
+kube-prometheus-stack:
+  grafana:
+    enabled: true
+    adminPassword: ""   # not needed — anonymous access
+    # ─── ANONYMOUS ACCESS (no login required) ───────────────────
+    grafana.ini:
+      auth.anonymous:
+        enabled: true
+        org_name: "Main Org."
+        org_role: Viewer
+      auth:
+        disable_login_form: true
+        disable_signout_menu: true
+      security:
+        allow_embedding: true      # Allows iframe embed in Zyphron dashboard
+      server:
+        root_url: "%(protocol)s://%(domain)s/grafana"
+        serve_from_sub_path: true
+    # ─── Pre-provisioned datasources ─────────────────────────────
+    additionalDataSources:
+      - name: Loki
+        type: loki
+        url: http://loki-stack:3100
+        access: proxy
+        isDefault: false
+    # ─── Pre-provisioned dashboards ──────────────────────────────
+    dashboardProviders:
+      dashboardproviders.yaml:
+        apiVersion: 1
+        providers:
+          - name: zyphron
+            orgId: 1
+            folder: Zyphron
+            type: file
+            disableDeletion: true
+            editable: false
+            options:
+              path: /var/lib/grafana/dashboards/zyphron
+    dashboardsConfigMaps:
+      zyphron: "zyphron-grafana-dashboards"
+    service:
+      type: ClusterIP
+      port: 80
+    resources:
+      requests: { memory: "128Mi", cpu: "50m" }
+      limits:   { memory: "256Mi", cpu: "250m" }
+  prometheus:
+    prometheusSpec:
+      resources:
+        requests: { memory: "256Mi", cpu: "100m" }
+        limits:   { memory: "512Mi", cpu: "500m" }
+      retention: "7d"
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            resources:
+              requests:
+                storage: "10Gi"
+  alertmanager:
+    enabled: false    # save resources on demo
+  nodeExporter:
+    enabled: true
+  kubeStateMetrics:
+    enabled: true
+
+loki-stack:
+  loki:
+    enabled: true
+    persistence:
+      enabled: true
+      size: "5Gi"
+    resources:
+      requests: { memory: "128Mi", cpu: "50m" }
+      limits:   { memory: "256Mi", cpu: "200m" }
+  promtail:
+    enabled: true    # auto-scrapes all pod logs
+
+# =============================================================
+# Traefik ingress
+# =============================================================
+traefik:
+  enabled: true
+  ports:
+    web:
+      port: 8000
+      expose:
+        default: true
+      exposedPort: 80
+    websecure:
+      port: 8443
+      expose:
+        default: true
+      exposedPort: 443
+      tls:
+        enabled: true
+        certResolver: letsencrypt
+  service:
+    type: LoadBalancer
+  logs:
+    general:
+      level: INFO
+  resources:
+    requests: { memory: "64Mi", cpu: "50m" }
+    limits:   { memory: "128Mi", cpu: "200m" }
+  # WebSocket middleware
+  additionalArguments:
+    - "--entryPoints.web.http.redirections.entryPoint.to=websecure"
+    - "--certificatesresolvers.letsencrypt.acme.email=admin@yourdomain.com"
+    - "--certificatesresolvers.letsencrypt.acme.storage=/data/acme.json"
+    - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"

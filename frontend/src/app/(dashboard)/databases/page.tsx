@@ -44,7 +44,7 @@ export default function DatabasesPage() {
   const filteredDatabases = databases.filter(
     (db) =>
       db.name.toLowerCase().includes(search.toLowerCase()) ||
-      db.slug.toLowerCase().includes(search.toLowerCase())
+      (db.slug || db.id).toLowerCase().includes(search.toLowerCase())
   );
 
   if (isLoading) {
@@ -184,7 +184,9 @@ function DatabaseCard({ database }: { database: DatabaseInstance }) {
       <div className="mt-4 grid gap-4 md:grid-cols-3">
         <div>
           <p className="text-sm text-muted-foreground">Host</p>
-          <p className="font-mono text-sm truncate">{database.host}:{database.port}</p>
+          <p className="font-mono text-sm truncate">
+            {database.host || 'N/A'}{database.port ? `:${database.port}` : ''}
+          </p>
         </div>
         <div>
           <p className="text-sm text-muted-foreground">Database</p>

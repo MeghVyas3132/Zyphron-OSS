@@ -234,11 +234,11 @@ export class MultiServiceDeployer {
     };
 
     try {
-      log(`🚀 Starting multi-service deployment with ${config.services.length} services`, 'info');
+      log(`Launch Starting multi-service deployment with ${config.services.length} services`, 'info');
 
       // Create deployment network
       const networkName = await this.createDeploymentNetwork(deploymentId, projectSlug);
-      log(`📡 Created network: ${networkName}`, 'info');
+      log(`Network Created network: ${networkName}`, 'info');
 
       // Build service connection map for environment injection
       const serviceContainerMap: Record<string, string> = {};
@@ -250,7 +250,7 @@ export class MultiServiceDeployer {
         const progress = Math.round(((i + 1) / config.services.length) * 100);
         
         onProgress?.(service.name, progress, `Deploying ${service.name}...`);
-        log(`📦 [${i + 1}/${config.services.length}] Deploying service: ${service.name}`, 'info', service.name);
+        log(`Package [${i + 1}/${config.services.length}] Deploying service: ${service.name}`, 'info', service.name);
 
         const serviceStartTime = Date.now();
 
@@ -309,14 +309,14 @@ export class MultiServiceDeployer {
               }
             }
 
-            log(`✅ Service ${service.name} deployed successfully`, 'info', service.name);
+            log(`Success Service ${service.name} deployed successfully`, 'info', service.name);
             
             // Wait for service to be healthy before proceeding
             if (result.containerId) {
               await this.waitForHealthy(result.containerId, service.name, log);
             }
           } else {
-            log(`❌ Service ${service.name} failed: ${result.error}`, 'error', service.name);
+            log(`Error Service ${service.name} failed: ${result.error}`, 'error', service.name);
             
             // Don't fail entire deployment for non-critical services
             if (this.isCriticalService(service, config.services)) {
@@ -341,7 +341,7 @@ export class MultiServiceDeployer {
       const totalDuration = Date.now() - startTime;
       const allSuccess = results.every(r => r.success);
 
-      log(`🎉 Multi-service deployment ${allSuccess ? 'completed' : 'partially completed'} in ${Math.round(totalDuration / 1000)}s`, 'info');
+      log(`Done Multi-service deployment ${allSuccess ? 'completed' : 'partially completed'} in ${Math.round(totalDuration / 1000)}s`, 'info');
 
       return {
         success: allSuccess,
@@ -396,7 +396,7 @@ export class MultiServiceDeployer {
     const containerName = `zyphron-${projectSlug}-${service.name}-${deploymentId.substring(0, 8)}`;
     const volumePrefix = `zyphron-${projectSlug}-${deploymentId.substring(0, 8)}`;
 
-    log(`🐳 Pulling image: ${config.image}`, 'info', service.name);
+    log(`Docker Pulling image: ${config.image}`, 'info', service.name);
 
     try {
       // Pull image
@@ -452,7 +452,7 @@ export class MultiServiceDeployer {
       // Start container
       await container.start();
 
-      log(`✅ Managed service ${service.name} started`, 'info', service.name);
+      log(`Success Managed service ${service.name} started`, 'info', service.name);
 
       return {
         serviceName: service.name,
@@ -494,7 +494,7 @@ export class MultiServiceDeployer {
 
     try {
       // Build image
-      log(`🔨 Building image for ${service.name}...`, 'info', service.name);
+      log(`Build Building image for ${service.name}...`, 'info', service.name);
       
       const buildResult = await this.builder.buildImage({
         projectPath: servicePath,
@@ -514,19 +514,19 @@ export class MultiServiceDeployer {
         };
       }
 
-      log(`✅ Image built: ${buildResult.imageName}:${buildResult.imageTag}`, 'info', service.name);
+      log(`Success Image built: ${buildResult.imageName}:${buildResult.imageTag}`, 'info', service.name);
 
       // Push to registry
-      log(`📤 Pushing image to registry...`, 'info', service.name);
+      log(`Push Pushing image to registry...`, 'info', service.name);
       
       const pushResult = await this.builder.pushImage(buildResult.imageName, buildResult.imageTag);
       
       if (!pushResult.success) {
-        log(`⚠️ Push failed, using local image: ${pushResult.error}`, 'warn', service.name);
+        log(`[WARN] Push failed, using local image: ${pushResult.error}`, 'warn', service.name);
       }
 
       // Deploy container
-      log(`🚢 Deploying container...`, 'info', service.name);
+      log(`Deploy Deploying container...`, 'info', service.name);
 
       const fullImageName = `${buildResult.imageName}:${buildResult.imageTag}`;
       
@@ -730,7 +730,7 @@ export class MultiServiceDeployer {
         }
 
         if (health.Status === 'healthy') {
-          log(`💚 Service ${serviceName} is healthy`, 'info', serviceName);
+          log(`Vue Service ${serviceName} is healthy`, 'info', serviceName);
           return;
         }
 
@@ -748,7 +748,7 @@ export class MultiServiceDeployer {
       }
     }
 
-    log(`⚠️ Service ${serviceName} health check timed out, continuing anyway`, 'warn', serviceName);
+    log(`[WARN] Service ${serviceName} health check timed out, continuing anyway`, 'warn', serviceName);
   }
 
   private isCriticalService(service: ServiceDefinition, allServices: ServiceDefinition[]): boolean {

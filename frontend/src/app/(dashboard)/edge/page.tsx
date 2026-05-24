@@ -24,11 +24,17 @@ import {
   useEdgeFunctionMetrics,
   useEdgeRegions
 } from '@/hooks/use-edge';
+import { useProjects } from '@/hooks/use-projects';
 
 export default function EdgePage() {
-  const [selectedProjectId] = useState('default');
+  const [selectedProjectId, setSelectedProjectId] = useState('');
+  const { data: projectsResponse } = useProjects({ page: 1, limit: 100 });
+  const projects = (projectsResponse?.data && typeof projectsResponse.data === 'object' && 'projects' in projectsResponse.data)
+    ? ((projectsResponse.data as { projects?: Array<{ id: string; name: string }> }).projects || [])
+    : [];
+  const effectiveProjectId = selectedProjectId || projects[0]?.id || '';
   const [showCodeEditor, setShowCodeEditor] = useState(false);
-  const { data: functions, isLoading, refetch } = useEdgeFunctions(selectedProjectId);
+  const { data: functions, isLoading, refetch } = useEdgeFunctions(effectiveProjectId);
   const { data: regions } = useEdgeRegions();
   const createMutation = useCreateEdgeFunction();
 
@@ -54,6 +60,18 @@ export default function EdgePage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <select
+            value={effectiveProjectId}
+            onChange={(e) => setSelectedProjectId(e.target.value)}
+            className="px-3 py-2 border border-input rounded-xl bg-card text-sm min-w-[180px]"
+          >
+            {projects.length === 0 && <option value="">No projects</option>}
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
           <Button onClick={() => refetch()} variant="outline" size="icon">
             <RefreshCw className="h-4 w-4" />
           </Button>
@@ -208,7 +226,7 @@ export default function EdgePage() {
             <div className="p-4 border-b flex items-center justify-between">
               <h3 className="font-semibold">Create Edge Function</h3>
               <Button variant="ghost" size="sm" onClick={() => setShowCodeEditor(false)}>
-                ✕
+                x
               </Button>
             </div>
             <div className="p-4 space-y-4">

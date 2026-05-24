@@ -6,10 +6,10 @@ import { request } from '@/lib/api';
 // Types
 export interface GitHubAccount {
   connected: boolean;
-  username: string;
-  avatarUrl: string;
-  name: string;
-  profileUrl: string;
+  username: string | null;
+  avatarUrl: string | null;
+  name: string | null;
+  profileUrl: string | null;
 }
 
 export interface GitHubRepo {
@@ -131,37 +131,38 @@ export function useGitHubAccount() {
   });
 }
 
-export function useGitHubRepos(page = 1) {
+export function useGitHubRepos(page = 1, enabled = true) {
   return useQuery({
     queryKey: githubKeys.repos(page),
     queryFn: () => githubApi.getRepos(page),
+    enabled,
     staleTime: 2 * 60 * 1000,
   });
 }
 
-export function useSearchGitHubRepos(query: string) {
+export function useSearchGitHubRepos(query: string, enabled = true) {
   return useQuery({
     queryKey: githubKeys.reposSearch(query),
     queryFn: () => githubApi.searchRepos(query),
-    enabled: query.length > 0,
+    enabled: query.length > 0 && enabled,
     staleTime: 2 * 60 * 1000,
   });
 }
 
-export function useGitHubBranches(owner: string, repo: string) {
+export function useGitHubBranches(owner: string, repo: string, enabled = true) {
   return useQuery({
     queryKey: githubKeys.branches(owner, repo),
     queryFn: () => githubApi.getBranches(owner, repo),
-    enabled: !!owner && !!repo,
+    enabled: !!owner && !!repo && enabled,
     staleTime: 5 * 60 * 1000,
   });
 }
 
-export function useAnalyzeRepo(owner: string, repo: string, branch?: string) {
+export function useAnalyzeRepo(owner: string, repo: string, branch?: string, enabled = true) {
   return useQuery({
     queryKey: githubKeys.analyze(owner, repo, branch),
     queryFn: () => githubApi.analyzeRepo(owner, repo, branch),
-    enabled: !!owner && !!repo,
+    enabled: !!owner && !!repo && enabled,
     staleTime: 5 * 60 * 1000,
   });
 }

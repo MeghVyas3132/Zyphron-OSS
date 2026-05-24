@@ -70,6 +70,17 @@ export interface ForkDatabaseInput {
   region?: string;
 }
 
+function unwrap<T>(response: unknown, key?: string): T {
+  const record = response as Record<string, unknown>;
+  if (key && record[key] !== undefined) return record[key] as T;
+  if (record.data && typeof record.data === 'object') {
+    const dataRecord = record.data as Record<string, unknown>;
+    if (key && dataRecord[key] !== undefined) return dataRecord[key] as T;
+    return record.data as T;
+  }
+  return response as T;
+}
+
 // Hooks
 
 // Get all branches for a project
@@ -78,9 +89,9 @@ export function useDatabaseBranches(projectId: string) {
     queryKey: ['database-branches', projectId],
     queryFn: async () => {
       const response = await api.get<{ branches: DatabaseBranch[] }>(
-        `/db-branches?projectId=${projectId}`
+        `/projects/${projectId}/db-branches`
       );
-      return response.branches;
+      return unwrap<DatabaseBranch[]>(response, 'branches') || [];
     },
     enabled: !!projectId,
   });
@@ -120,11 +131,11 @@ export function useCreateDatabaseBranch() {
 
   return useMutation({
     mutationFn: async (input: CreateBranchInput) => {
-      const response = await api.post<{ branch: DatabaseBranch }>(
-        '/db-branches',
+      const response = await api.post<DatabaseBranch | { branch: DatabaseBranch }>(
+        `/projects/${input.projectId}/db-branches`,
         input
       );
-      return response.branch;
+      return unwrap<DatabaseBranch>(response, 'branch');
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['database-branches', data.projectId] });
@@ -166,9 +177,9 @@ export function useSyncDatabaseBranch(branchId: string) {
       }>(`/db-branches/${branchId}/sync`, input);
       return response;
     },
-    onSuccess: (data) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['database-branch', branchId] });
-      queryClient.invalidateQueries({ queryKey: ['database-branches', data.branch.projectId] });
+      queryClient.invalidateQueries({ queryKey: ['database-branches'] });
     },
   });
 }

@@ -17,6 +17,8 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useProjects } from '@/hooks/use-projects';
+import type { Project } from '@/lib/api';
 import { 
   useDatabaseBranches, 
   useCreateDatabaseBranch,
@@ -26,10 +28,18 @@ import {
 } from '@/hooks/use-db-branching';
 
 export default function DBBranchesPage() {
-  const [selectedProjectId] = useState('default');
+  const [selectedProjectId, setSelectedProjectId] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const { data: projectsResponse } = useProjects({ page: 1, limit: 100 });
+  const projectsPayload = projectsResponse?.data as unknown;
+  const projects: Project[] = Array.isArray(projectsPayload)
+    ? projectsPayload
+    : projectsPayload && typeof projectsPayload === 'object' && 'projects' in projectsPayload
+      ? ((projectsPayload as { projects?: Project[] }).projects || [])
+      : [];
+  const effectiveProjectId = selectedProjectId || projects[0]?.id || '';
   
-  const { data: branches, isLoading, refetch } = useDatabaseBranches(selectedProjectId);
+  const { data: branches, isLoading, refetch } = useDatabaseBranches(effectiveProjectId);
   const createMutation = useCreateDatabaseBranch();
 
   if (isLoading) {
@@ -54,6 +64,18 @@ export default function DBBranchesPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <select
+            value={effectiveProjectId}
+            onChange={(e) => setSelectedProjectId(e.target.value)}
+            className="px-3 py-2 border border-input rounded-xl bg-card text-sm min-w-[180px]"
+          >
+            {projects.length === 0 && <option value="">No projects</option>}
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
           <Button onClick={() => refetch()} variant="outline" size="icon">
             <RefreshCw className="h-4 w-4" />
           </Button>
@@ -266,7 +288,7 @@ export default function DBBranchesPage() {
             <div className="p-4 border-b flex items-center justify-between">
               <h3 className="font-semibold">Create Database Branch</h3>
               <Button variant="ghost" size="sm" onClick={() => setShowCreateModal(false)}>
-                ✕
+                x
               </Button>
             </div>
             <div className="p-4 space-y-4">

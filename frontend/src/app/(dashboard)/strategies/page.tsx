@@ -25,6 +25,8 @@ import {
   useCanaryDeploy,
   useStrategyRecommendation
 } from '@/hooks/use-strategies';
+import { useProjects } from '@/hooks/use-projects';
+import type { Project } from '@/lib/api';
 
 const strategies = [
   {
@@ -60,11 +62,19 @@ const strategies = [
 ];
 
 export default function StrategiesPage() {
-  const [selectedProjectId] = useState('default');
+  const [selectedProjectId, setSelectedProjectId] = useState('');
   const [selectedStrategy, setSelectedStrategy] = useState<string | null>(null);
+  const { data: projectsResponse } = useProjects({ page: 1, limit: 100 });
+  const projectsPayload = projectsResponse?.data as unknown;
+  const projects: Project[] = Array.isArray(projectsPayload)
+    ? projectsPayload
+    : projectsPayload && typeof projectsPayload === 'object' && 'projects' in projectsPayload
+      ? ((projectsPayload as { projects?: Project[] }).projects || [])
+      : [];
+  const effectiveProjectId = selectedProjectId || projects[0]?.id || '';
   
-  const { data: deployments, isLoading, refetch } = useStrategyDeployments(selectedProjectId);
-  const { data: recommendation } = useStrategyRecommendation(selectedProjectId);
+  const { data: deployments, isLoading, refetch } = useStrategyDeployments(effectiveProjectId);
+  const { data: recommendation } = useStrategyRecommendation(effectiveProjectId);
   const rollingMutation = useRollingDeploy();
   const blueGreenMutation = useBlueGreenDeploy();
   const canaryMutation = useCanaryDeploy();
@@ -90,9 +100,23 @@ export default function StrategiesPage() {
             Choose how to deploy your applications with zero-downtime strategies
           </p>
         </div>
-        <Button onClick={() => refetch()} variant="outline" size="icon">
-          <RefreshCw className="h-4 w-4" />
-        </Button>
+        <div className="flex gap-2">
+          <select
+            value={effectiveProjectId}
+            onChange={(e) => setSelectedProjectId(e.target.value)}
+            className="px-3 py-2 border border-input rounded-xl bg-card text-sm min-w-[180px]"
+          >
+            {projects.length === 0 && <option value="">No projects</option>}
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+          <Button onClick={() => refetch()} variant="outline" size="icon">
+            <RefreshCw className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
 
       {/* AI Recommendation */}
@@ -143,7 +167,7 @@ export default function StrategiesPage() {
                 <div>
                   <h3 className="font-semibold">{strategy.name}</h3>
                   {recommendation?.strategy === strategy.id && (
-                    <span className="text-xs text-purple-500">✨ Recommended</span>
+                    <span className="text-xs text-purple-500">Recommended Recommended</span>
                   )}
                 </div>
               </div>
@@ -189,7 +213,7 @@ export default function StrategiesPage() {
             size="lg"
             onClick={() => {
               const input = {
-                projectId: selectedProjectId,
+                projectId: effectiveProjectId,
                 deploymentId: `deploy-${Date.now()}`,
                 strategy: selectedStrategy as 'rolling' | 'blue-green' | 'canary',
               };
@@ -202,7 +226,7 @@ export default function StrategiesPage() {
                 canaryMutation.mutate(input);
               }
             }}
-            disabled={rollingMutation.isPending || blueGreenMutation.isPending || canaryMutation.isPending}
+            disabled={!effectiveProjectId || rollingMutation.isPending || blueGreenMutation.isPending || canaryMutation.isPending}
           >
             {(rollingMutation.isPending || blueGreenMutation.isPending || canaryMutation.isPending) ? (
               <>

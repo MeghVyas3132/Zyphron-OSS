@@ -10,9 +10,9 @@ interface WebhooksProps {
 }
 
 const providerConfig = {
-  GITHUB: { name: 'GitHub', icon: '🐙', color: 'text-gray-200' },
-  GITLAB: { name: 'GitLab', icon: '🦊', color: 'text-orange-500' },
-  BITBUCKET: { name: 'Bitbucket', icon: '🪣', color: 'text-blue-500' },
+  GITHUB: { name: 'GitHub', icon: 'GitHub', color: 'text-gray-200' },
+  GITLAB: { name: 'GitLab', icon: 'GitLab', color: 'text-orange-500' },
+  BITBUCKET: { name: 'Bitbucket', icon: 'Bitbucket', color: 'text-blue-500' },
 };
 
 export function Webhooks({ projectId }: WebhooksProps) {

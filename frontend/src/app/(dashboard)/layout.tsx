@@ -6,12 +6,13 @@ import { usePathname, useRouter } from 'next/navigation';
 import {
   Activity,
   Bell,
+  BarChart3,
   ChevronLeft,
   ChevronRight,
-  Cloud,
   Database,
   FlaskConical,
   FolderKanban,
+  Gauge,
   GitBranch,
   LayoutDashboard,
   LogOut,
@@ -20,26 +21,35 @@ import {
   Rocket,
   Search,
   Settings,
+  Shield,
   Sun,
   Zap,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { Button } from '@/components/ui/button';
+import { PageTransition } from '@/components/animated/page-transition';
 import { cn } from '@/lib/utils';
 
 const navigation = [
-  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-  { name: 'Projects', href: '/projects', icon: FolderKanban },
-  { name: 'AI Insights', href: '/ai', icon: Zap },
-  { name: 'Databases', href: '/databases', icon: Database },
-  { name: 'Multi-Cloud', href: '/cloud', icon: Cloud },
-  { name: 'Edge Functions', href: '/edge', icon: Rocket },
-  { name: 'Strategies', href: '/strategies', icon: Rocket },
-  { name: 'Observability', href: '/observability', icon: Activity },
-  { name: 'Chaos Testing', href: '/chaos', icon: FlaskConical },
-  { name: 'DB Branches', href: '/db-branches', icon: GitBranch },
-  { name: 'Self-Deploy', href: '/self-deploy', icon: Zap },
-  { name: 'Settings', href: '/settings', icon: Settings },
+  // Core
+  { name: 'Dashboard',    href: '/dashboard',   icon: LayoutDashboard },
+  { name: 'Projects',     href: '/projects',    icon: FolderKanban },
+  // Monitoring
+  { name: 'Observability',href: '/observability',icon: Activity },
+  { name: 'Grafana',      href: '/grafana',     icon: BarChart3 },
+  { name: 'Audit Logs',   href: '/audit',       icon: Shield },
+  // DevOps
+  { name: 'Load Testing', href: '/stress',      icon: Gauge },
+  { name: 'Chaos Testing',href: '/chaos',       icon: FlaskConical },
+  { name: 'AI Insights',  href: '/ai',          icon: Zap },
+  // Data
+  { name: 'Databases',    href: '/databases',   icon: Database },
+  { name: 'DB Branches',  href: '/db-branches', icon: GitBranch },
+  // Platform
+  { name: 'Edge Functions',href: '/edge',       icon: Rocket },
+  { name: 'Strategies',   href: '/strategies',  icon: Rocket },
+  { name: 'Self-Deploy',  href: '/self-deploy', icon: Zap },
+  { name: 'Settings',     href: '/settings',    icon: Settings },
 ];
 const delayClasses = ['animate-delay-1', 'animate-delay-2', 'animate-delay-3', 'animate-delay-4'];
 
@@ -96,6 +106,11 @@ export default function DashboardLayout({
 
   return (
     <div className="min-h-screen premium-shell flex">
+      <div className="ambient-layer">
+        <div className="ambient-orb ambient-orb-a" />
+        <div className="ambient-orb ambient-orb-b" />
+        <div className="ambient-orb ambient-orb-c" />
+      </div>
       <aside
         className={cn(
           'fixed left-0 top-0 z-40 h-screen border-r bg-card/75 backdrop-blur-xl transition-all duration-500',
@@ -137,14 +152,14 @@ export default function DashboardLayout({
                   className={cn(
                     'stagger-in',
                     index < delayClasses.length ? delayClasses[index] : undefined,
-                    'group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-all duration-300',
+                    'group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-all duration-300 motion-safe:hover:translate-x-1',
                     active
                       ? 'bg-foreground text-background shadow-md'
                       : 'text-muted-foreground hover:text-foreground hover:bg-accent/60',
                     collapsed && 'justify-center'
                   )}
                 >
-                  <item.icon className={cn('h-5 w-5 flex-shrink-0', active ? 'text-background' : '')} />
+                  <item.icon className={cn('h-5 w-5 flex-shrink-0 transition-transform duration-500 group-hover:-rotate-6 group-hover:scale-110', active ? 'text-background' : '')} />
                   {!collapsed && <span className="font-medium">{item.name}</span>}
                 </Link>
               );
@@ -211,7 +226,7 @@ export default function DashboardLayout({
         </header>
 
         <main className="p-5 sm:p-8">
-          <div className="stagger-in">{children}</div>
+          <PageTransition>{children}</PageTransition>
         </main>
       </div>
     </div>

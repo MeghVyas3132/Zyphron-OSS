@@ -4,18 +4,18 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
 
 const buttonVariants = cva(
-  'inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50',
+  'relative inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 overflow-hidden before:pointer-events-none before:absolute before:inset-0 before:bg-[radial-gradient(circle_at_50%_120%,hsl(var(--foreground)/0.22),transparent_60%)] before:opacity-0 before:transition-opacity before:duration-500 hover:before:opacity-100 active:scale-[0.985]',
   {
     variants: {
       variant: {
-        default: 'bg-primary text-primary-foreground shadow-sm hover:brightness-110 hover:shadow-lg',
+        default: 'bg-primary text-primary-foreground shadow-sm hover:brightness-110 hover:shadow-[0_14px_32px_hsl(var(--foreground)/0.22)]',
         destructive:
-          'bg-destructive text-destructive-foreground hover:brightness-110',
+          'bg-destructive text-destructive-foreground hover:brightness-110 hover:shadow-[0_10px_25px_hsl(var(--destructive)/0.35)]',
         outline:
-          'border border-border bg-background/70 hover:bg-accent/60 hover:text-accent-foreground',
+          'border border-border bg-background/70 hover:bg-accent/60 hover:text-accent-foreground hover:border-foreground/35',
         secondary:
-          'bg-secondary text-secondary-foreground hover:bg-secondary/90',
-        ghost: 'hover:bg-accent/60 hover:text-accent-foreground',
+          'bg-secondary text-secondary-foreground hover:bg-secondary/90 hover:shadow-[0_10px_25px_hsl(var(--foreground)/0.14)]',
+        ghost: 'hover:bg-accent/60 hover:text-accent-foreground hover:-translate-y-[1px]',
         link: 'text-primary underline-offset-4 hover:underline',
       },
       size: {

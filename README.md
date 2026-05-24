@@ -9,7 +9,7 @@
 
 ---
 
-## 🏗️ Monorepo Structure
+## Architecture Monorepo Structure
 
 ```
 zyphron/

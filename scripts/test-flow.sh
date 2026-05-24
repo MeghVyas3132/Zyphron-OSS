@@ -64,12 +64,12 @@ print_test() {
 }
 
 print_success() {
-    echo -e "${GREEN}  ✓ $1${NC}"
+    echo -e "${GREEN}  [OK] $1${NC}"
     TESTS_PASSED=$((TESTS_PASSED + 1))
 }
 
 print_fail() {
-    echo -e "${RED}  ✗ $1${NC}"
+    echo -e "${RED}  [FAIL] $1${NC}"
     TESTS_FAILED=$((TESTS_FAILED + 1))
 }
 
@@ -909,11 +909,11 @@ print_summary() {
     
     if [ $TESTS_FAILED -eq 0 ]; then
         echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        echo -e "${GREEN}  ✓ ALL TESTS PASSED!${NC}"
+        echo -e "${GREEN}  [OK] ALL TESTS PASSED!${NC}"
         echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     else
         echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        echo -e "${RED}  ✗ SOME TESTS FAILED${NC}"
+        echo -e "${RED}  [FAIL] SOME TESTS FAILED${NC}"
         echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     fi
     echo ""

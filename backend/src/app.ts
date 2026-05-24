@@ -43,6 +43,7 @@ import { chaosRoutes } from '@/routes/chaos.js';
 import { dbBranchingRoutes } from '@/routes/db-branching.js';
 import selfDeployRoutes from '@/routes/self-deploy.js';
 import { adminRoutes } from '@/routes/admin.js';
+import { stressRoutes } from '@/routes/stress.js';
 
 // ===========================================
 // CREATE APPLICATION
@@ -377,6 +378,7 @@ export async function createApp(): Promise<FastifyInstance> {
   await app.register(dbBranchingRoutes, { prefix: '/api/v1' });
   await app.register(selfDeployRoutes, { prefix: '/api/v1/self-deploy' });
   await app.register(adminRoutes, { prefix: '/api/v1/admin' });
+  await app.register(stressRoutes, { prefix: '/api/v1' });
   await app.register(websocketRoutes);
 
   return app;

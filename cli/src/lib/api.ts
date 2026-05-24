@@ -278,3 +278,30 @@ export function getErrorMessage(error: unknown): string {
 // ===========================================
 
 export const api = new ApiClient();
+
+// ===========================================
+// FACTORY — create a one-off axios client
+// Used by deploy/status/logs/rollback/stress commands
+// so each command can pass its own base URL + token.
+// ===========================================
+
+export interface SimpleApiClient {
+  get<T>(path: string): Promise<{ data: T }>;
+  post<T>(path: string, body?: unknown): Promise<{ data: T }>;
+}
+
+export function createApiClient(baseUrl: string, token: string): SimpleApiClient {
+  const client = axios.create({
+    baseURL: `${baseUrl}/api/v1`,
+    timeout: 10 * 60 * 1000, // 10 min — stress tests take a while
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return {
+    get: <T>(path: string) => client.get<T>(path) as Promise<{ data: T }>,
+    post: <T>(path: string, body?: unknown) => client.post<T>(path, body) as Promise<{ data: T }>,
+  };
+}

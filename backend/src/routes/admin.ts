@@ -5,6 +5,9 @@ import { createLogger } from '@/lib/logger.js';
 import { createAuditLog, queryAuditLogs } from '@/services/audit/index.js';
 import { publishEvent } from '@/lib/redis.js';
 import { sendDeploymentEvent } from '@/lib/kafka.js';
+import { emailService } from '@/services/email/index.js';
+import { getPlatformMetrics } from '@/services/observability/index.js';
+import { getDeployerService } from '@/services/deployer/index.js';
 
 const logger = createLogger('admin-routes');
 
@@ -331,6 +334,31 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       request,
     });
 
+    // Email revocation notice (non-blocking)
+    void emailService.sendAccessRevoked(target.email, target.name || 'there');
+
+    // Stop all LIVE containers for this user
+    try {
+      const liveDeployments = await prisma.deployment.findMany({
+        where: { userId, status: 'LIVE' },
+        include: { project: { select: { slug: true } } },
+      });
+      const { config: appConfig } = await import('@/config/index.js');
+      const deployer = getDeployerService('zyphron-network', appConfig.deployment.baseDomain);
+      for (const dep of liveDeployments) {
+        const metadata = dep.metadata as Record<string, unknown> | null;
+        if (metadata?.containerName && typeof metadata.containerName === 'string') {
+          void deployer.removeContainer(metadata.containerName);
+        }
+      }
+      await prisma.deployment.updateMany({
+        where: { userId, status: 'LIVE' },
+        data: { status: 'CANCELLED', completedAt: new Date(), errorMessage: 'User access revoked' },
+      });
+    } catch (stopError) {
+      logger.warn({ stopError, userId }, 'Failed to stop some live containers during revocation');
+    }
+
     logger.warn({ actorId, userId }, 'Admin revoked user access and active assets');
     return reply.send({
       success: true,
@@ -519,6 +547,60 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       success: true,
       data: result,
     });
+  });
+
+  // ===========================================
+  // PLATFORM METRICS — for admin dashboard
+  // ===========================================
+
+  app.get('/metrics', {
+    onRequest: [app.authenticate, app.requireAdmin],
+  }, async (_request: FastifyRequest, reply: FastifyReply) => {
+    const metrics = await getPlatformMetrics();
+    return reply.send({ success: true, data: metrics });
+  });
+
+  // ===========================================
+  // KILL A LIVE DEPLOYMENT (stop container)
+  // ===========================================
+
+  app.delete('/deployments/:deploymentId/kill', {
+    onRequest: [app.authenticate, app.requireAdmin],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { deploymentId } = deploymentIdParamsSchema.parse(request.params);
+    const actorId = request.user?.id as string;
+
+    const deployment = await prisma.deployment.findUnique({
+      where: { id: deploymentId },
+      include: { project: { select: { name: true, userId: true } } },
+    });
+
+    if (!deployment) {
+      return reply.status(404).send({ success: false, error: { code: 'NOT_FOUND', message: 'Deployment not found' } });
+    }
+
+    const metadata = deployment.metadata as Record<string, unknown> | null;
+    if (metadata?.containerName && typeof metadata.containerName === 'string') {
+      const { config: appConfig } = await import('@/config/index.js');
+      const deployer = getDeployerService('zyphron-network', appConfig.deployment.baseDomain);
+      await deployer.removeContainer(metadata.containerName);
+    }
+
+    await prisma.deployment.update({
+      where: { id: deploymentId },
+      data: { status: 'CANCELLED', completedAt: new Date(), errorMessage: 'Killed by administrator' },
+    });
+
+    await createAuditLog({
+      userId: actorId,
+      action: 'admin.deployment.kill',
+      resourceType: 'deployment',
+      resourceId: deploymentId,
+      metadata: { targetUserId: deployment.userId, projectName: deployment.project?.name },
+      request,
+    });
+
+    return reply.send({ success: true, data: { message: 'Deployment killed and container stopped' } });
   });
 
   logger.info('Admin routes registered');

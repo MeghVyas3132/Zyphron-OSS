@@ -43,23 +43,23 @@ const statusConfig = {
 
 const frameworkIcons: Record<string, string> = {
   nextjs: '▲',
-  react: '⚛️',
-  vue: '💚',
-  nuxt: '💚',
-  svelte: '🔥',
-  sveltekit: '🔥',
-  angular: '🔺',
-  express: '⚡',
-  fastify: '⚡',
-  nestjs: '🐱',
-  flask: '🐍',
-  django: '🐍',
-  fastapi: '🐍',
-  go: '🐹',
-  rust: '🦀',
-  static: '📄',
-  docker: '🐳',
-  unknown: '📦',
+  react: 'React',
+  vue: 'Vue',
+  nuxt: 'Vue',
+  svelte: 'Svelte',
+  sveltekit: 'Svelte',
+  angular: 'Angular',
+  express: 'Node',
+  fastify: 'Node',
+  nestjs: 'Nest',
+  flask: 'Python',
+  django: 'Python',
+  fastapi: 'Python',
+  go: 'Go',
+  rust: 'Rust',
+  static: 'Static',
+  docker: 'Docker',
+  unknown: 'Package',
 };
 
 export default function ProjectDetailPage() {
@@ -79,7 +79,7 @@ export default function ProjectDetailPage() {
   const deployments = deploymentsData?.data || [];
   const isLoading = projectLoading || deploymentsLoading;
 
-  const frameworkIcon = frameworkIcons[project?.framework || 'unknown'] || '📦';
+  const frameworkIcon = frameworkIcons[project?.framework || 'unknown'] || 'Package';
 
   const handleDeploy = async () => {
     try {
@@ -387,7 +387,7 @@ export default function ProjectDetailPage() {
             <p>[2024-01-15 10:32:45] Build completed successfully</p>
             <p>[2024-01-15 10:32:46] Uploading artifacts...</p>
             <p>[2024-01-15 10:32:50] Deploying to edge network...</p>
-            <p>[2024-01-15 10:32:55] ✓ Deployment ready</p>
+            <p>[2024-01-15 10:32:55] [OK] Deployment ready</p>
             <p className="text-muted-foreground mt-4">No new logs...</p>
           </div>
         </div>

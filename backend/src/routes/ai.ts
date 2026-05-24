@@ -80,7 +80,9 @@ export async function aiRoutes(app: FastifyInstance) {
   // ===========================================
   // POST /api/v1/ai/analyze-repo - Analyze from GitHub repo
   // ===========================================
-  app.post('/analyze-repo', async (request, reply) => {
+  app.post('/analyze-repo', {
+    onRequest: [app.authenticate],
+  }, async (request, reply) => {
     try {
       const body = analyzeRepoSchema.parse(request.body);
       const user = (request as { user?: { id: string } }).user;

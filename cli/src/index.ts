@@ -9,8 +9,13 @@ process.env.FORCE_COLOR = '3';
 
 import { Command } from 'commander';
 import { loginCommand, logoutCommand, whoamiCommand, registerCommand } from './commands/auth/index.js';
-import { 
-  style, 
+import { registerDeployCommand } from './commands/deploy/index.js';
+import { registerStatusCommand } from './commands/status/index.js';
+import { registerLogsCommand } from './commands/logs/index.js';
+import { registerRollbackCommand } from './commands/rollback/index.js';
+import { registerStressCommand } from './commands/stress/index.js';
+import {
+  style,
   purpleBlueGradient,
   sleep,
   animatedDivider,
@@ -120,10 +125,11 @@ async function showAnimatedHelp(): Promise<void> {
   console.log(`  ${style.purple('Deployments')}`);
   await sleep(20);
   const deployCommands = [
-    ['deploy', 'Deploy your project'],
-    ['logs', 'View deployment logs'],
-    ['status', 'Check deployment status'],
-    ['rollback', 'Rollback to previous version'],
+    ['deploy', 'Deploy a GitHub repo'],
+    ['logs', 'Tail live build/runtime logs'],
+    ['status', 'List all your deployments'],
+    ['rollback', 'Rollback to previous deployment'],
+    ['stress', 'Run a load test against a deployment'],
   ];
   for (const [cmd, desc] of deployCommands) {
     console.log(`    ${style.blue('>')} ${style.purple(cmd.padEnd(12))} ${style.blueLight(desc)}`);
@@ -157,11 +163,15 @@ async function showAnimatedHelp(): Promise<void> {
   // Examples
   console.log(style.purpleBright('  EXAMPLES'));
   await sleep(30);
-  console.log(`    ${style.dim('$')} ${style.purple('zyphron login')}`);
+  console.log(`    ${style.dim('$')} ${style.purple('zy login')}`);
   await sleep(20);
-  console.log(`    ${style.dim('$')} ${style.purple('zyphron init')} ${style.blue('--name my-app')}`);
+  console.log(`    ${style.dim('$')} ${style.purple('zy deploy')} ${style.blue('https://github.com/user/repo')}`);
   await sleep(20);
-  console.log(`    ${style.dim('$')} ${style.purple('zyphron deploy')}`);
+  console.log(`    ${style.dim('$')} ${style.purple('zy status')}`);
+  await sleep(20);
+  console.log(`    ${style.dim('$')} ${style.purple('zy logs')} ${style.blue('<deploymentId>')}`);
+  await sleep(20);
+  console.log(`    ${style.dim('$')} ${style.purple('zy stress')} ${style.blue('my-app --vus 50 --duration 60')}`);
   console.log('');
   
   // Footer
@@ -219,10 +229,11 @@ program.configureHelp({
     output.push(`    ${style.blue('>')} ${style.purple('link')}        ${style.blueLight('Link current directory')}`);
     output.push('');
     output.push(`  ${style.purple('Deployments')}`);
-    output.push(`    ${style.blue('>')} ${style.purple('deploy')}      ${style.blueLight('Deploy your project')}`);
-    output.push(`    ${style.blue('>')} ${style.purple('logs')}        ${style.blueLight('View deployment logs')}`);
-    output.push(`    ${style.blue('>')} ${style.purple('status')}      ${style.blueLight('Check deployment status')}`);
-    output.push(`    ${style.blue('>')} ${style.purple('rollback')}    ${style.blueLight('Rollback to previous version')}`);
+    output.push(`    ${style.blue('>')} ${style.purple('deploy')}      ${style.blueLight('Deploy a GitHub repo')}`);
+    output.push(`    ${style.blue('>')} ${style.purple('logs')}        ${style.blueLight('Tail live build/runtime logs')}`);
+    output.push(`    ${style.blue('>')} ${style.purple('status')}      ${style.blueLight('List all your deployments')}`);
+    output.push(`    ${style.blue('>')} ${style.purple('rollback')}    ${style.blueLight('Rollback to previous deployment')}`);
+    output.push(`    ${style.blue('>')} ${style.purple('stress')}      ${style.blueLight('Run a k6 load test against a deployment')}`);
     output.push('');
     output.push(`  ${style.purple('Environment')}`);
     output.push(`    ${style.blue('>')} ${style.purple('env')}         ${style.blueLight('Manage environment variables')}`);
@@ -237,9 +248,11 @@ program.configureHelp({
     
     // Examples
     output.push(style.purpleBright('  EXAMPLES'));
-    output.push(`    ${style.dim('$')} ${style.purple('zyphron login')}`);
-    output.push(`    ${style.dim('$')} ${style.purple('zyphron init')} ${style.blue('--name my-app')}`);
-    output.push(`    ${style.dim('$')} ${style.purple('zyphron deploy')}`);
+    output.push(`    ${style.dim('$')} ${style.purple('zy login')}`);
+    output.push(`    ${style.dim('$')} ${style.purple('zy deploy')} ${style.blue('https://github.com/user/repo')}`);
+    output.push(`    ${style.dim('$')} ${style.purple('zy status')}`);
+    output.push(`    ${style.dim('$')} ${style.purple('zy logs')} ${style.blue('<deploymentId>')}`);
+    output.push(`    ${style.dim('$')} ${style.purple('zy stress')} ${style.blue('my-app --vus 50 --duration 60')}`);
     output.push('');
     
     // Footer
@@ -254,13 +267,21 @@ program.configureHelp({
 });
 
 // ===========================================
-// REGISTER AUTH COMMANDS
+// REGISTER COMMANDS
 // ===========================================
 
+// Auth
 program.addCommand(loginCommand);
 program.addCommand(logoutCommand);
 program.addCommand(whoamiCommand);
 program.addCommand(registerCommand);
+
+// Deployments
+registerDeployCommand(program);
+registerStatusCommand(program);
+registerLogsCommand(program);
+registerRollbackCommand(program);
+registerStressCommand(program);
 
 // ===========================================
 // DEFAULT ACTION (no command) - ANIMATED

@@ -35,26 +35,26 @@ type Step = 'connect' | 'select' | 'configure' | 'deploying';
 
 const frameworkIcons: Record<string, string> = {
   nextjs: '▲',
-  react: '⚛️',
-  vue: '💚',
-  nuxt: '💚',
-  svelte: '🔥',
-  sveltekit: '🔥',
-  angular: '🔺',
-  express: '⚡',
-  fastify: '⚡',
-  nestjs: '🐱',
-  flask: '🐍',
-  django: '🐍',
-  fastapi: '🐍',
-  go: '🐹',
-  rust: '🦀',
-  astro: '🚀',
-  remix: '💿',
-  static: '📄',
-  docker: '🐳',
-  python: '🐍',
-  unknown: '📦',
+  react: 'React',
+  vue: 'Vue',
+  nuxt: 'Vue',
+  svelte: 'Svelte',
+  sveltekit: 'Svelte',
+  angular: 'Angular',
+  express: 'Node',
+  fastify: 'Node',
+  nestjs: 'Nest',
+  flask: 'Python',
+  django: 'Python',
+  fastapi: 'Python',
+  go: 'Go',
+  rust: 'Rust',
+  astro: 'Launch',
+  remix: 'Remix',
+  static: 'Static',
+  docker: 'Docker',
+  python: 'Python',
+  unknown: 'Package',
 };
 
 export default function NewProjectPage() {
@@ -76,10 +76,12 @@ export default function NewProjectPage() {
   });
   const [analysis, setAnalysis] = useState<RepoAnalysis | null>(null);
   const [gitUrl, setGitUrl] = useState('');
+  const [connectError, setConnectError] = useState('');
 
   // GitHub queries
   const { data: githubAccount, isLoading: accountLoading, refetch: refetchAccount } = useGitHubAccount();
-  const { data: reposData, isLoading: reposLoading, refetch: refetchRepos } = useGitHubRepos(repoPage);
+  const githubConnected = Boolean(githubAccount?.data?.connected);
+  const { data: reposData, isLoading: reposLoading, refetch: refetchRepos } = useGitHubRepos(repoPage, githubConnected);
   const initiateOAuth = useInitiateGitHubOAuth();
   const oauthCallback = useGitHubOAuthCallback();
 
@@ -118,9 +120,10 @@ export default function NewProjectPage() {
   const { data: analysisData, isLoading: analysisLoading } = useAnalyzeRepo(
     repoOwner,
     repoName,
-    projectConfig.branch
+    projectConfig.branch,
+    githubConnected
   );
-  const { data: branchesData } = useGitHubBranches(repoOwner, repoName);
+  const { data: branchesData } = useGitHubBranches(repoOwner, repoName, githubConnected);
 
   // Update analysis when data changes
   useEffect(() => {
@@ -155,7 +158,13 @@ export default function NewProjectPage() {
   );
 
   const handleConnectGitHub = () => {
-    initiateOAuth.mutate();
+    setConnectError('');
+    initiateOAuth.mutate(undefined, {
+      onError: (error) => {
+        const message = error instanceof Error ? error.message : 'GitHub OAuth is not available in this environment.';
+        setConnectError(message);
+      },
+    });
   };
 
   const handleSelectRepo = (repo: GitHubRepo) => {
@@ -226,14 +235,29 @@ export default function NewProjectPage() {
         autoDeploy: true,
       });
 
+      const createdProject = project?.data && typeof project.data === 'object' && 'project' in project.data
+        ? (project.data.project as { slug?: string })
+        : (project.data as { slug?: string });
+      const createdSlug = createdProject?.slug;
+
+      if (!createdSlug) {
+        throw new Error('Project was created but slug was not returned by API.');
+      }
+
       await deployProject.mutateAsync({
-        slug: project.data.slug,
+        slug: createdSlug,
         branch: projectConfig.branch,
       });
 
-      router.push(`/projects/${project.data.slug}`);
+      router.push(`/projects/${createdSlug}`);
     } catch (error) {
-      console.error('Failed to create project:', error);
+      if (error instanceof Error && error.message.includes('status 409')) {
+        const suffix = String(Date.now()).slice(-4);
+        setProjectConfig((prev) => ({
+          ...prev,
+          slug: `${generateSlug(prev.name || selectedRepo.name)}-${suffix}`,
+        }));
+      }
       setStep('configure');
     }
   };
@@ -308,6 +332,9 @@ export default function NewProjectPage() {
               {initiateOAuth.isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Github className="h-5 w-5" />}
               Connect GitHub
             </Button>
+            {connectError && (
+              <p className="text-sm text-red-500 mt-4">{connectError}</p>
+            )}
           </div>
 
           <div className="relative">
@@ -336,7 +363,11 @@ export default function NewProjectPage() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   {githubAccount.data.avatarUrl && (
-                    <img src={githubAccount.data.avatarUrl} alt={githubAccount.data.username} className="h-10 w-10 rounded-full" />
+                    <img
+                      src={githubAccount.data.avatarUrl ?? ''}
+                      alt={githubAccount.data.username ?? 'GitHub avatar'}
+                      className="h-10 w-10 rounded-full"
+                    />
                   )}
                   <div>
                     <p className="font-medium">{githubAccount.data.name || githubAccount.data.username}</p>

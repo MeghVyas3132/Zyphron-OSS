@@ -61,11 +61,14 @@ export async function githubRoutes(app: FastifyInstance): Promise<void> {
     });
 
     if (!user?.githubId) {
-      return reply.status(404).send({
-        success: false,
-        error: {
-          code: 'GITHUB_NOT_CONNECTED',
-          message: 'GitHub account not connected',
+      return reply.send({
+        success: true,
+        data: {
+          connected: false,
+          username: null,
+          avatarUrl: null,
+          name: null,
+          profileUrl: null,
         },
       });
     }
@@ -74,11 +77,14 @@ export async function githubRoutes(app: FastifyInstance): Promise<void> {
     const githubToken = await getGitHubToken(userId);
 
     if (!githubToken) {
-      return reply.status(401).send({
-        success: false,
-        error: {
-          code: 'GITHUB_TOKEN_EXPIRED',
-          message: 'GitHub token expired, please reconnect',
+      return reply.send({
+        success: true,
+        data: {
+          connected: false,
+          username: null,
+          avatarUrl: null,
+          name: null,
+          profileUrl: null,
         },
       });
     }
@@ -92,11 +98,14 @@ export async function githubRoutes(app: FastifyInstance): Promise<void> {
       });
 
       if (!response.ok) {
-        return reply.status(401).send({
-          success: false,
-          error: {
-            code: 'GITHUB_TOKEN_INVALID',
-            message: 'GitHub token invalid, please reconnect',
+        return reply.send({
+          success: true,
+          data: {
+            connected: false,
+            username: null,
+            avatarUrl: null,
+            name: null,
+            profileUrl: null,
           },
         });
       }
@@ -136,11 +145,14 @@ export async function githubRoutes(app: FastifyInstance): Promise<void> {
     const githubToken = await getGitHubToken(userId);
 
     if (!githubToken) {
-      return reply.status(401).send({
-        success: false,
-        error: {
-          code: 'GITHUB_NOT_CONNECTED',
-          message: 'GitHub account not connected or token expired',
+      return reply.send({
+        success: true,
+        data: [],
+        pagination: {
+          page: parseInt(page),
+          perPage: parseInt(per_page),
+          hasNextPage: false,
+          hasPrevPage: false,
         },
       });
     }

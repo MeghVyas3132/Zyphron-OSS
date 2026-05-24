@@ -75,6 +75,17 @@ export interface InvokeFunctionInput {
   body?: unknown;
 }
 
+function unwrap<T>(response: unknown, key?: string): T {
+  const record = response as Record<string, unknown>;
+  if (key && record[key] !== undefined) return record[key] as T;
+  if (record.data && typeof record.data === 'object') {
+    const dataRecord = record.data as Record<string, unknown>;
+    if (key && dataRecord[key] !== undefined) return dataRecord[key] as T;
+    return record.data as T;
+  }
+  return response as T;
+}
+
 // Hooks
 
 // Get all edge functions for a project
@@ -83,9 +94,9 @@ export function useEdgeFunctions(projectId: string) {
     queryKey: ['edge-functions', projectId],
     queryFn: async () => {
       const response = await api.get<{ functions: EdgeFunction[] }>(
-        `/edge/functions?projectId=${projectId}`
+        `/edge/projects/${projectId}/functions`
       );
-      return response.functions;
+      return unwrap<EdgeFunction[]>(response, 'functions') || [];
     },
     enabled: !!projectId,
   });
@@ -96,10 +107,10 @@ export function useEdgeFunction(functionId: string) {
   return useQuery({
     queryKey: ['edge-function', functionId],
     queryFn: async () => {
-      const response = await api.get<{ function: EdgeFunction }>(
+      const response = await api.get<EdgeFunction>(
         `/edge/functions/${functionId}`
       );
-      return response.function;
+      return unwrap<EdgeFunction>(response);
     },
     enabled: !!functionId,
   });
@@ -111,11 +122,11 @@ export function useCreateEdgeFunction() {
 
   return useMutation({
     mutationFn: async (input: CreateEdgeFunctionInput) => {
-      const response = await api.post<{ function: EdgeFunction }>(
-        '/edge/functions',
+      const response = await api.post<EdgeFunction>(
+        `/edge/projects/${input.projectId}/functions`,
         input
       );
-      return response.function;
+      return unwrap<EdgeFunction>(response);
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['edge-functions', data.projectId] });
@@ -129,11 +140,11 @@ export function useUpdateEdgeFunction(functionId: string) {
 
   return useMutation({
     mutationFn: async (input: UpdateEdgeFunctionInput) => {
-      const response = await api.patch<{ function: EdgeFunction }>(
+      const response = await api.patch<EdgeFunction>(
         `/edge/functions/${functionId}`,
         input
       );
-      return response.function;
+      return unwrap<EdgeFunction>(response);
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['edge-function', functionId] });
@@ -163,10 +174,10 @@ export function useDeployEdgeFunction(functionId: string) {
 
   return useMutation({
     mutationFn: async () => {
-      const response = await api.post<{ function: EdgeFunction }>(
+      const response = await api.post<EdgeFunction>(
         `/edge/functions/${functionId}/deploy`
       );
-      return response.function;
+      return unwrap<EdgeFunction>(response);
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['edge-function', functionId] });
@@ -207,7 +218,7 @@ export function useEdgeFunctionMetrics(
       const response = await api.get<{ metrics: EdgeFunctionMetrics }>(
         `/edge/functions/${functionId}/metrics?${params.toString()}`
       );
-      return response.metrics;
+      return unwrap<EdgeFunctionMetrics>(response, 'metrics');
     },
     enabled: !!functionId,
     refetchInterval: 30000, // Refresh every 30 seconds
@@ -238,7 +249,7 @@ export function useEdgeFunctionLogs(
       const response = await api.get<{ logs: EdgeFunctionLog[] }>(
         `/edge/functions/${functionId}/logs?${params.toString()}`
       );
-      return response.logs;
+      return unwrap<EdgeFunctionLog[]>(response, 'logs') || [];
     },
     enabled: !!functionId,
     refetchInterval: 10000, // Refresh every 10 seconds
@@ -251,11 +262,11 @@ export function useRollbackEdgeFunction(functionId: string) {
 
   return useMutation({
     mutationFn: async (version: number) => {
-      const response = await api.post<{ function: EdgeFunction }>(
+      const response = await api.post<EdgeFunction>(
         `/edge/functions/${functionId}/rollback`,
         { version }
       );
-      return response.function;
+      return unwrap<EdgeFunction>(response);
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['edge-function', functionId] });
@@ -268,12 +279,14 @@ export function useRollbackEdgeFunction(functionId: string) {
 export function useEdgeRegions() {
   return useQuery({
     queryKey: ['edge-regions'],
-    queryFn: async () => {
-      const response = await api.get<{ regions: Array<{ id: string; name: string; location: string }> }>(
-        '/edge/regions'
-      );
-      return response.regions;
-    },
+    queryFn: async () => [
+      { id: 'iad1', name: 'Washington, D.C.', location: 'US East' },
+      { id: 'sfo1', name: 'San Francisco', location: 'US West' },
+      { id: 'lhr1', name: 'London', location: 'Europe' },
+      { id: 'fra1', name: 'Frankfurt', location: 'Europe' },
+      { id: 'sin1', name: 'Singapore', location: 'Asia' },
+      { id: 'hnd1', name: 'Tokyo', location: 'Asia' },
+    ],
     staleTime: 1000 * 60 * 60, // Cache for 1 hour
   });
 }

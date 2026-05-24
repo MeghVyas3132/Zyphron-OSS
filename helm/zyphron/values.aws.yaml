@@ -1,0 +1,132 @@
+# =============================================================
+# Zyphron — AWS Free Tier / Credits Profile
+# Target: t3.xlarge (4 vCPU / 16GB) OR Oracle ARM A1 (4 OCPU / 24GB FREE)
+#
+# Capacity: 25 projects @ 512Mi default = 12.5GB for user apps
+#           Platform stack uses ~4GB
+#           Total: ~16-17GB  ✓ fits t3.xlarge / Oracle A1
+#
+# Cost (AWS credits):
+#   t3.xlarge on-demand  → ~$0.17/hr  → demo for 1 week ≈ $29
+#   t3.xlarge Spot       → ~$0.05/hr  → demo for 1 week ≈ $8
+#   Oracle ARM A1.Flex   → $0/month   → FOREVER FREE
+# =============================================================
+
+global:
+  domain: "yourdomain.com"      # Replace with your domain / EC2 public IP
+  registry: "your-ecr-url"      # ECR free tier: 500MB/month free; ~$0.10/GB after
+  imageTag: "latest"
+  storageClass: "gp3"           # AWS gp3 EBS — cheapest SSD
+
+# ─── API ──────────────────────────────────────────────────────
+api:
+  replicaCount: 1
+  resources:
+    requests: { memory: "256Mi", cpu: "100m" }
+    limits:   { memory: "512Mi", cpu: "500m" }
+  env:
+    NODE_ENV: production
+    DEPLOYMENT_MODE: k8s
+    BASE_DOMAIN: "yourdomain.com"
+    USE_HTTPS: "true"
+    MAX_CONCURRENT_BUILDS: "5"
+  # Set via --set-string api.secrets.JWT_SECRET=... or K8s Secret
+  secrets:
+    JWT_SECRET: ""           # REQUIRED — generate: openssl rand -hex 32
+    RESEND_API_KEY: ""       # Free tier: 3000 emails/month at resend.com
+    GROQ_API_KEYS: ""        # Free: groq.com/keys (6000 tokens/min free)
+
+# ─── Worker ───────────────────────────────────────────────────
+worker:
+  replicaCount: 2
+  resources:
+    requests: { memory: "512Mi", cpu: "200m" }
+    limits:   { memory: "1Gi",   cpu: "1000m" }
+
+# ─── Frontend ─────────────────────────────────────────────────
+frontend:
+  replicaCount: 1
+  resources:
+    requests: { memory: "128Mi", cpu: "50m" }
+    limits:   { memory: "256Mi", cpu: "200m" }
+
+# ─── PostgreSQL ───────────────────────────────────────────────
+postgresql:
+  enabled: true
+  primary:
+    resources:
+      requests: { memory: "256Mi", cpu: "100m" }
+      limits:   { memory: "512Mi", cpu: "500m" }
+    persistence:
+      enabled: true
+      size: "30Gi"    # AWS: included in 30GB free EBS
+
+# ─── Redis ────────────────────────────────────────────────────
+redis:
+  enabled: true
+  master:
+    persistence:
+      enabled: true
+      size: "2Gi"
+
+# ─── Kafka ────────────────────────────────────────────────────
+# Disable on minimal setup; API gracefully falls back to Redis queues
+kafka:
+  enabled: false      # Set true if you have 16GB+
+
+# ─── Monitoring ───────────────────────────────────────────────
+monitoring:
+  enabled: true
+  logsEnabled: true
+
+kube-prometheus-stack:
+  grafana:
+    grafana.ini:
+      auth.anonymous:
+        enabled: true
+        org_name: "Main Org."
+        org_role: Viewer
+      auth:
+        disable_login_form: true
+      security:
+        allow_embedding: true
+    resources:
+      requests: { memory: "128Mi", cpu: "50m" }
+      limits:   { memory: "256Mi", cpu: "200m" }
+  prometheus:
+    prometheusSpec:
+      retention: "7d"
+      resources:
+        requests: { memory: "256Mi", cpu: "100m" }
+        limits:   { memory: "512Mi", cpu: "500m" }
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            resources:
+              requests:
+                storage: "10Gi"
+  alertmanager:
+    enabled: false
+  nodeExporter:
+    enabled: true
+  kubeStateMetrics:
+    enabled: true
+
+loki-stack:
+  loki:
+    persistence:
+      enabled: true
+      size: "5Gi"
+
+# ─── Traefik ──────────────────────────────────────────────────
+traefik:
+  enabled: true
+  service:
+    type: LoadBalancer
+    annotations:
+      # AWS NLB (free for first 750 hours under free tier)
+      service.beta.kubernetes.io/aws-load-balancer-type: nlb
+  additionalArguments:
+    - "--certificatesresolvers.letsencrypt.acme.email=your-email@example.com"
+    - "--certificatesresolvers.letsencrypt.acme.storage=/data/acme.json"
+    - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"

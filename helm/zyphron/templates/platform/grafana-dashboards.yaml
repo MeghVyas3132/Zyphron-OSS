@@ -1,0 +1,221 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zyphron-grafana-dashboards
+  namespace: zyphron-system
+  labels:
+    {{- include "zyphron.labels" . | nindent 4 }}
+    grafana_dashboard: "1"
+data:
+  # ─── SRE Overview ──────────────────────────────────────────────────────────
+  sre-overview.json: |
+    {
+      "title": "Zyphron SRE Overview",
+      "uid": "zyphron-sre",
+      "tags": ["zyphron"],
+      "timezone": "browser",
+      "refresh": "30s",
+      "panels": [
+        {
+          "id": 1, "type": "stat", "title": "Active Deployments",
+          "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
+          "targets": [{
+            "datasource": "Prometheus",
+            "expr": "count(kube_deployment_status_replicas_available{namespace=~\"zyphron-user-.*\"} > 0)"
+          }],
+          "options": { "colorMode": "background", "graphMode": "none" },
+          "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }] } } }
+        },
+        {
+          "id": 2, "type": "stat", "title": "Total Projects",
+          "gridPos": { "x": 4, "y": 0, "w": 4, "h": 4 },
+          "targets": [{
+            "datasource": "Prometheus",
+            "expr": "count(kube_namespace_labels{namespace=~\"zyphron-user-.*\"})"
+          }],
+          "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "blue", "value": null }] } } }
+        },
+        {
+          "id": 3, "type": "stat", "title": "API Error Rate (5xx)",
+          "gridPos": { "x": 8, "y": 0, "w": 4, "h": 4 },
+          "targets": [{
+            "datasource": "Prometheus",
+            "expr": "sum(rate(http_request_duration_seconds_count{status=~\"5..\", job=\"zyphron-api\"}[5m])) / sum(rate(http_request_duration_seconds_count{job=\"zyphron-api\"}[5m])) * 100"
+          }],
+          "options": { "colorMode": "background" },
+          "fieldConfig": { "defaults": { "unit": "percent", "thresholds": { "steps": [{"color":"green","value":null},{"color":"yellow","value":1},{"color":"red","value":5}] } } }
+        },
+        {
+          "id": 4, "type": "stat", "title": "API p99 Latency",
+          "gridPos": { "x": 12, "y": 0, "w": 4, "h": 4 },
+          "targets": [{
+            "datasource": "Prometheus",
+            "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{job=\"zyphron-api\"}[5m])) by (le)) * 1000"
+          }],
+          "fieldConfig": { "defaults": { "unit": "ms", "thresholds": { "steps": [{"color":"green","value":null},{"color":"yellow","value":200},{"color":"red","value":500}] } } }
+        },
+        {
+          "id": 5, "type": "stat", "title": "Worker Queue Depth",
+          "gridPos": { "x": 16, "y": 0, "w": 4, "h": 4 },
+          "targets": [{
+            "datasource": "Prometheus",
+            "expr": "zyphron_build_queue_depth"
+          }],
+          "fieldConfig": { "defaults": { "thresholds": { "steps": [{"color":"green","value":null},{"color":"yellow","value":5},{"color":"red","value":15}] } } }
+        },
+        {
+          "id": 6, "type": "stat", "title": "Node CPU %",
+          "gridPos": { "x": 20, "y": 0, "w": 4, "h": 4 },
+          "targets": [{
+            "datasource": "Prometheus",
+            "expr": "100 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100"
+          }],
+          "fieldConfig": { "defaults": { "unit": "percent", "thresholds": { "steps": [{"color":"green","value":null},{"color":"yellow","value":70},{"color":"red","value":90}] } } }
+        },
+        {
+          "id": 10, "type": "timeseries", "title": "API Request Rate (req/s)",
+          "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+          "targets": [{
+            "datasource": "Prometheus",
+            "expr": "sum(rate(http_request_duration_seconds_count{job=\"zyphron-api\"}[1m])) by (method, route)",
+            "legendFormat": "{{method}} {{route}}"
+          }],
+          "fieldConfig": { "defaults": { "unit": "reqps" } }
+        },
+        {
+          "id": 11, "type": "timeseries", "title": "API Latency Percentiles",
+          "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+          "targets": [
+            { "datasource": "Prometheus", "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{job=\"zyphron-api\"}[5m])) by (le)) * 1000", "legendFormat": "p50" },
+            { "datasource": "Prometheus", "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"zyphron-api\"}[5m])) by (le)) * 1000", "legendFormat": "p95" },
+            { "datasource": "Prometheus", "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{job=\"zyphron-api\"}[5m])) by (le)) * 1000", "legendFormat": "p99" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "ms" } }
+        },
+        {
+          "id": 20, "type": "timeseries", "title": "Node Memory Usage",
+          "gridPos": { "x": 0, "y": 12, "w": 8, "h": 6 },
+          "targets": [{
+            "datasource": "Prometheus",
+            "expr": "(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100"
+          }],
+          "fieldConfig": { "defaults": { "unit": "percent", "max": 100 } }
+        },
+        {
+          "id": 21, "type": "timeseries", "title": "Disk I/O",
+          "gridPos": { "x": 8, "y": 12, "w": 8, "h": 6 },
+          "targets": [
+            { "datasource": "Prometheus", "expr": "rate(node_disk_read_bytes_total[5m])", "legendFormat": "read" },
+            { "datasource": "Prometheus", "expr": "rate(node_disk_written_bytes_total[5m])", "legendFormat": "write" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "Bps" } }
+        },
+        {
+          "id": 22, "type": "timeseries", "title": "Network Traffic",
+          "gridPos": { "x": 16, "y": 12, "w": 8, "h": 6 },
+          "targets": [
+            { "datasource": "Prometheus", "expr": "rate(node_network_receive_bytes_total{device!=\"lo\"}[5m])", "legendFormat": "rx {{device}}" },
+            { "datasource": "Prometheus", "expr": "rate(node_network_transmit_bytes_total{device!=\"lo\"}[5m])", "legendFormat": "tx {{device}}" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "Bps" } }
+        }
+      ],
+      "schemaVersion": 38,
+      "version": 1
+    }
+
+  # ─── Deployments Dashboard ─────────────────────────────────────────────────
+  deployments.json: |
+    {
+      "title": "Zyphron Deployments",
+      "uid": "zyphron-deployments",
+      "tags": ["zyphron"],
+      "refresh": "30s",
+      "panels": [
+        {
+          "id": 1, "type": "stat", "title": "Deployments Today",
+          "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
+          "targets": [{
+            "datasource": "Prometheus",
+            "expr": "increase(zyphron_deployments_total[24h])"
+          }],
+          "fieldConfig": { "defaults": { "thresholds": { "steps": [{"color":"green","value":null}] } } }
+        },
+        {
+          "id": 2, "type": "stat", "title": "Success Rate",
+          "gridPos": { "x": 4, "y": 0, "w": 4, "h": 4 },
+          "targets": [{
+            "datasource": "Prometheus",
+            "expr": "zyphron_deployment_success_rate * 100"
+          }],
+          "fieldConfig": { "defaults": { "unit": "percent", "thresholds": { "steps": [{"color":"red","value":null},{"color":"yellow","value":80},{"color":"green","value":95}] } } }
+        },
+        {
+          "id": 3, "type": "stat", "title": "Avg Build Time",
+          "gridPos": { "x": 8, "y": 0, "w": 4, "h": 4 },
+          "targets": [{
+            "datasource": "Prometheus",
+            "expr": "avg(zyphron_build_duration_seconds)"
+          }],
+          "fieldConfig": { "defaults": { "unit": "s" } }
+        },
+        {
+          "id": 10, "type": "timeseries", "title": "Deployments per Hour",
+          "gridPos": { "x": 0, "y": 4, "w": 24, "h": 8 },
+          "targets": [
+            { "datasource": "Prometheus", "expr": "increase(zyphron_deployments_total{status=\"success\"}[1h])", "legendFormat": "success" },
+            { "datasource": "Prometheus", "expr": "increase(zyphron_deployments_total{status=\"failed\"}[1h])", "legendFormat": "failed" }
+          ]
+        }
+      ],
+      "schemaVersion": 38
+    }
+
+  # ─── Stress Test Results ───────────────────────────────────────────────────
+  stress-tests.json: |
+    {
+      "title": "Zyphron Stress Tests",
+      "uid": "zyphron-stress",
+      "tags": ["zyphron"],
+      "refresh": "10s",
+      "panels": [
+        {
+          "id": 1, "type": "stat", "title": "Last Test — p95 Latency",
+          "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
+          "targets": [{
+            "datasource": "Prometheus",
+            "expr": "zyphron_stress_test_p95_ms"
+          }],
+          "fieldConfig": { "defaults": { "unit": "ms", "thresholds": { "steps": [{"color":"green","value":null},{"color":"yellow","value":200},{"color":"red","value":500}] } } }
+        },
+        {
+          "id": 2, "type": "stat", "title": "Last Test — Error Rate",
+          "gridPos": { "x": 4, "y": 0, "w": 4, "h": 4 },
+          "targets": [{
+            "datasource": "Prometheus",
+            "expr": "zyphron_stress_test_error_rate_pct"
+          }],
+          "fieldConfig": { "defaults": { "unit": "percent", "thresholds": { "steps": [{"color":"green","value":null},{"color":"yellow","value":1},{"color":"red","value":5}] } } }
+        },
+        {
+          "id": 3, "type": "stat", "title": "Last Test — Req/s",
+          "gridPos": { "x": 8, "y": 0, "w": 4, "h": 4 },
+          "targets": [{
+            "datasource": "Prometheus",
+            "expr": "zyphron_stress_test_rps"
+          }],
+          "fieldConfig": { "defaults": { "unit": "reqps" } }
+        },
+        {
+          "id": 10, "type": "timeseries", "title": "Response Time Distribution",
+          "gridPos": { "x": 0, "y": 4, "w": 24, "h": 8 },
+          "targets": [
+            { "datasource": "Prometheus", "expr": "zyphron_stress_test_p50_ms", "legendFormat": "p50" },
+            { "datasource": "Prometheus", "expr": "zyphron_stress_test_p95_ms", "legendFormat": "p95" },
+            { "datasource": "Prometheus", "expr": "zyphron_stress_test_p99_ms", "legendFormat": "p99" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "ms" } }
+        }
+      ],
+      "schemaVersion": 38
+    }

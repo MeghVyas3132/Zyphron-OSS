@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: zyphron-system
+  labels:
+    {{- include "zyphron.labels" . | nindent 4 }}
+    zyphron.managed: "true"

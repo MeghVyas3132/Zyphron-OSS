@@ -6,14 +6,10 @@ import { createApp } from './app.js';
 import { config } from './config/index.js';
 import { createLogger } from './lib/logger.js';
 import { connectRedis, disconnectRedis } from './lib/redis.js';
-import { getProducer, disconnectKafka } from './lib/kafka.js';
+import { connectKafka, disconnectKafka } from './lib/kafka.js';
 import { prisma } from './lib/prisma.js';
 
 const logger = createLogger('server');
-
-// ===========================================
-// GRACEFUL SHUTDOWN
-// ===========================================
 
 async function gracefulShutdown(signal: string): Promise<void> {
   logger.info({ signal }, 'Received shutdown signal, starting graceful shutdown');
@@ -24,15 +20,12 @@ async function gracefulShutdown(signal: string): Promise<void> {
   }, 30000);
 
   try {
-    // Disconnect from databases
     await prisma.$disconnect();
     logger.info('Prisma disconnected');
 
-    // Disconnect from Redis
     await disconnectRedis();
     logger.info('Redis disconnected');
 
-    // Disconnect from Kafka
     await disconnectKafka();
     logger.info('Kafka disconnected');
 
@@ -46,26 +39,21 @@ async function gracefulShutdown(signal: string): Promise<void> {
   }
 }
 
-// ===========================================
-// MAIN
-// ===========================================
-
 async function main(): Promise<void> {
   try {
-    logger.info({
-      env: config.env,
-      nodeEnv: process.env.NODE_ENV,
-    }, 'Starting Zyphron API server');
+    logger.info({ env: config.env }, 'Starting Zyphron API server');
 
-    // Connect to Redis
+    // Connect Redis (required)
     await connectRedis();
     logger.info('Redis connected');
 
-    // Connect to Kafka
-    await getProducer();
-    logger.info('Kafka producer connected');
+    // Connect Kafka (optional — soft gate)
+    const kafkaConnected = await connectKafka();
+    if (!kafkaConnected) {
+      logger.warn('Running without Kafka — event streaming disabled, core deployments still work');
+    }
 
-    // Test database connection
+    // Test database connection (required)
     await prisma.$queryRaw`SELECT 1`;
     logger.info('Database connected');
 
@@ -81,9 +69,8 @@ async function main(): Promise<void> {
       host: config.host,
       port: config.port,
       url: `http://${config.host}:${config.port}`,
-    }, 'Zyphron API server started');
+    }, '🚀 Zyphron API server started');
 
-    // Handle shutdown signals
     process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
     process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
@@ -93,5 +80,4 @@ async function main(): Promise<void> {
   }
 }
 
-// Run the server
 main();

@@ -18,6 +18,8 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useProjects } from '@/hooks/use-projects';
+import type { Project } from '@/lib/api';
 import { 
   useChaosExperiments, 
   useCreateExperiment,
@@ -27,19 +29,27 @@ import {
 } from '@/hooks/use-chaos';
 
 const experimentTypes = [
-  { id: 'network-delay', name: 'Network Delay', description: 'Add latency to network requests', icon: '🌐' },
-  { id: 'cpu-stress', name: 'CPU Stress', description: 'Increase CPU load', icon: '💻' },
-  { id: 'memory-stress', name: 'Memory Stress', description: 'Consume memory resources', icon: '🧠' },
-  { id: 'disk-fill', name: 'Disk Fill', description: 'Fill disk space', icon: '💾' },
-  { id: 'container-kill', name: 'Container Kill', description: 'Kill containers randomly', icon: '🔪' },
-  { id: 'dependency-failure', name: 'Dependency Failure', description: 'Simulate dependency failures', icon: '🔗' },
+  { id: 'network-delay', name: 'Network Delay', description: 'Add latency to network requests', icon: 'Net' },
+  { id: 'cpu-stress', name: 'CPU Stress', description: 'Increase CPU load', icon: 'CPU' },
+  { id: 'memory-stress', name: 'Memory Stress', description: 'Consume memory resources', icon: 'Memory' },
+  { id: 'disk-fill', name: 'Disk Fill', description: 'Fill disk space', icon: 'Disk' },
+  { id: 'container-kill', name: 'Container Kill', description: 'Kill containers randomly', icon: 'Kill' },
+  { id: 'dependency-failure', name: 'Dependency Failure', description: 'Simulate dependency failures', icon: 'Dependency' },
 ];
 
 export default function ChaosPage() {
-  const [selectedProjectId] = useState('default');
+  const [selectedProjectId, setSelectedProjectId] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const { data: projectsResponse } = useProjects({ page: 1, limit: 100 });
+  const projectsPayload = projectsResponse?.data as unknown;
+  const projects: Project[] = Array.isArray(projectsPayload)
+    ? projectsPayload
+    : projectsPayload && typeof projectsPayload === 'object' && 'projects' in projectsPayload
+      ? ((projectsPayload as { projects?: Project[] }).projects || [])
+      : [];
+  const effectiveProjectId = selectedProjectId || projects[0]?.id || '';
   
-  const { data: experiments, isLoading, refetch } = useChaosExperiments(selectedProjectId);
+  const { data: experiments, isLoading, refetch } = useChaosExperiments(effectiveProjectId);
   const createMutation = useCreateExperiment();
   const runMutation = useRunExperiment();
 
@@ -65,6 +75,18 @@ export default function ChaosPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <select
+            value={effectiveProjectId}
+            onChange={(e) => setSelectedProjectId(e.target.value)}
+            className="px-3 py-2 border border-input rounded-xl bg-card text-sm min-w-[180px]"
+          >
+            {projects.length === 0 && <option value="">No projects</option>}
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
           <Button onClick={() => refetch()} variant="outline" size="icon">
             <RefreshCw className="h-4 w-4" />
           </Button>
@@ -243,7 +265,7 @@ export default function ChaosPage() {
             <div className="p-4 border-b flex items-center justify-between">
               <h3 className="font-semibold">Create Chaos Experiment</h3>
               <Button variant="ghost" size="sm" onClick={() => setShowCreateModal(false)}>
-                ✕
+                x
               </Button>
             </div>
             <div className="p-4 space-y-4">

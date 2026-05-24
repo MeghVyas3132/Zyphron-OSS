@@ -1,0 +1,115 @@
+# =============================================================
+# RBAC — Zyphron Worker needs cluster-wide permissions
+# to create/delete namespaces and K8s resources for user projects
+# =============================================================
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: zyphron-worker
+  namespace: zyphron-system
+  labels:
+    {{- include "zyphron.labels" . | nindent 4 }}
+
+---
+# ClusterRole: allow worker to manage user-project namespaces
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: zyphron-worker
+  labels:
+    {{- include "zyphron.labels" . | nindent 4 }}
+rules:
+  # Namespace management
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "create", "delete", "patch"]
+
+  # Deployments, Services, ConfigMaps, Secrets, PVCs
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["*"]
+  - apiGroups: [""]
+    resources: ["services", "configmaps", "secrets", "persistentvolumeclaims", "pods"]
+    verbs: ["*"]
+
+  # Ingress
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["*"]
+
+  # Traefik CRDs
+  - apiGroups: ["traefik.containo.us", "traefik.io"]
+    resources: ["ingressroutes", "middlewares", "ingressroutetcps"]
+    verbs: ["*"]
+
+  # Pod logs (for build streaming)
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get", "list", "watch"]
+
+  # Metrics
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: zyphron-worker
+  labels:
+    {{- include "zyphron.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: zyphron-worker
+subjects:
+  - kind: ServiceAccount
+    name: zyphron-worker
+    namespace: zyphron-system
+
+---
+# ServiceAccount for the API (read-only pod/node metrics)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: zyphron-api
+  namespace: zyphron-system
+  labels:
+    {{- include "zyphron.labels" . | nindent 4 }}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: zyphron-api
+  labels:
+    {{- include "zyphron.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: [""]
+    resources: ["pods", "services", "namespaces"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: zyphron-api
+  labels:
+    {{- include "zyphron.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: zyphron-api
+subjects:
+  - kind: ServiceAccount
+    name: zyphron-api
+    namespace: zyphron-system

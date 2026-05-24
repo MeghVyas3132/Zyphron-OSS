@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zyphron-api-config
+  namespace: zyphron-system
+  labels:
+    {{- include "zyphron.labels" . | nindent 4 }}
+data:
+  NODE_ENV: "{{ .Values.api.env.NODE_ENV | default "production" }}"
+  PORT: "{{ .Values.api.service.port }}"
+  LOG_LEVEL: "{{ .Values.api.env.LOG_LEVEL | default "info" }}"
+  DEPLOYMENT_MODE: "k8s"
+  BASE_DOMAIN: "{{ .Values.global.domain }}"
+  USE_HTTPS: "{{ .Values.api.env.USE_HTTPS | default "false" }}"
+  MAX_CONCURRENT_BUILDS: "{{ .Values.api.env.MAX_CONCURRENT_BUILDS | default "5" }}"
+  CONTAINER_REGISTRY: "{{ .Values.global.registry }}"
+  K8S_IN_CLUSTER: "true"
+  # Grafana proxy path (for dashboard embed)
+  GRAFANA_URL: "http://{{ .Release.Name }}-grafana.zyphron-system.svc.cluster.local"
+  GRAFANA_BASE_PATH: "/grafana"

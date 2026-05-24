@@ -56,12 +56,12 @@ print_test() {
 }
 
 print_success() {
-    echo -e "${GREEN}  ✓ $1${NC}"
+    echo -e "${GREEN}  [OK] $1${NC}"
     ((TESTS_PASSED++))
 }
 
 print_fail() {
-    echo -e "${RED}  ✗ $1${NC}"
+    echo -e "${RED}  [FAIL] $1${NC}"
     ((TESTS_FAILED++))
 }
 
@@ -657,11 +657,11 @@ print_summary() {
     
     if [ $TESTS_FAILED -eq 0 ]; then
         echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        echo -e "${GREEN}  ✓ ALL CORE TESTS PASSED!${NC}"
+        echo -e "${GREEN}  [OK] ALL CORE TESTS PASSED!${NC}"
         echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     else
         echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        echo -e "${YELLOW}  ⚠ SOME TESTS FAILED - Check if services are running${NC}"
+        echo -e "${YELLOW}  [WARN] SOME TESTS FAILED - Check if services are running${NC}"
         echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     fi
     

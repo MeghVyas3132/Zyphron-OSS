@@ -156,9 +156,9 @@ export function printBannerMini(): void {
 
 export const symbols = {
   // Status
-  success: style.success('✓'),
-  error: style.error('✗'),
-  warning: style.warning('⚠'),
+  success: style.success('[OK]'),
+  error: style.error('[FAIL]'),
+  warning: style.warning('[WARN]'),
   info: style.info('ℹ'),
   
   // Progress
@@ -166,7 +166,7 @@ export const symbols = {
   arrowRight: style.purple('→'),
   arrowDown: style.purple('↓'),
   bullet: style.purple('•'),
-  star: style.purple('★'),
+  star: style.purple('*'),
   
   // Boxes
   boxTopLeft: style.purple('╔'),
@@ -246,7 +246,7 @@ export function successBox(content: string): string {
     padding: 1,
     borderStyle: 'round',
     borderColor: '#10B981',
-    title: style.success(' ✓ Success '),
+    title: style.success(' [OK] Success '),
     titleAlignment: 'left',
   });
 }
@@ -256,7 +256,7 @@ export function errorBox(content: string): string {
     padding: 1,
     borderStyle: 'round',
     borderColor: '#EF4444',
-    title: style.error(' ✗ Error '),
+    title: style.error(' [FAIL] Error '),
     titleAlignment: 'left',
   });
 }
@@ -783,12 +783,12 @@ export async function showLoadingAnimation(text: string, durationMs = 1500): Pro
 
 export async function showSuccessAnimation(text: string): Promise<void> {
   await sleep(100);
-  console.log(`  ${style.purple('✓')} ${style.cyan(text)}`);
+  console.log(`  ${style.purple('[OK]')} ${style.cyan(text)}`);
 }
 
 export async function showErrorAnimation(text: string): Promise<void> {
   await sleep(100);
-  console.log(`  ${style.error('✗')} ${style.error(text)}`);
+  console.log(`  ${style.error('[FAIL]')} ${style.error(text)}`);
 }
 
 // ===========================================

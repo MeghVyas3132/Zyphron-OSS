@@ -26,7 +26,7 @@ const databaseTypes: {
   {
     type: 'POSTGRESQL',
     name: 'PostgreSQL',
-    icon: '🐘',
+    icon: 'Postgres',
     description: 'Powerful, open source object-relational database',
     versions: ['16', '15', '14', '13'],
     defaultVersion: '16',
@@ -34,7 +34,7 @@ const databaseTypes: {
   {
     type: 'MYSQL',
     name: 'MySQL',
-    icon: '🐬',
+    icon: 'MySQL',
     description: 'Popular open-source relational database',
     versions: ['8.0', '5.7'],
     defaultVersion: '8.0',
@@ -42,7 +42,7 @@ const databaseTypes: {
   {
     type: 'MONGODB',
     name: 'MongoDB',
-    icon: '🍃',
+    icon: 'MongoDB',
     description: 'Document-oriented NoSQL database',
     versions: ['7.0', '6.0', '5.0'],
     defaultVersion: '7.0',
@@ -50,7 +50,7 @@ const databaseTypes: {
   {
     type: 'REDIS',
     name: 'Redis',
-    icon: '⚡',
+    icon: 'Node',
     description: 'In-memory data structure store and cache',
     versions: ['7.2', '7.0', '6.2'],
     defaultVersion: '7.2',
@@ -200,13 +200,13 @@ export function CreateDatabaseModal({ isOpen, onClose, onSuccess }: CreateDataba
                   <Label htmlFor="db-name">Database Name</Label>
                   <Input
                     id="db-name"
-                    placeholder="my-database"
+                    placeholder="my_database"
                     value={name}
-                    onChange={(e) => setName(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'))}
+                    onChange={(e) => setName(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_'))}
                     className="font-mono"
                   />
                   <p className="text-xs text-muted-foreground">
-                    Lowercase letters, numbers, and hyphens only
+                    Must start with a letter. Use lowercase letters, numbers, and underscores.
                   </p>
                 </div>
 

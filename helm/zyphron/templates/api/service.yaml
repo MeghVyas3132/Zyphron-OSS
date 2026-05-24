@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: zyphron-api
+  namespace: zyphron-system
+  labels:
+    {{- include "zyphron.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  selector:
+    app: zyphron-api
+  ports:
+    - port: 80
+      targetPort: {{ .Values.api.service.port }}
+      name: http
+  type: ClusterIP
+---
+# Ingress for the API
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: zyphron-api
+  namespace: zyphron-system
+  annotations:
+    kubernetes.io/ingress.class: traefik
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+spec:
+  rules:
+    - host: "api.{{ .Values.global.domain }}"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: zyphron-api
+                port: { number: 80 }

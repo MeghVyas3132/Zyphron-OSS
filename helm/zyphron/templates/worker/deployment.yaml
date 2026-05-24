@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zyphron-worker
+  namespace: zyphron-system
+  labels:
+    {{- include "zyphron.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  selector:
+    matchLabels:
+      app: zyphron-worker
+  template:
+    metadata:
+      labels:
+        app: zyphron-worker
+        {{- include "zyphron.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: zyphron-worker
+      # Workers need Docker socket OR Kaniko for in-cluster builds
+      # Using Docker-outside-of-Docker via host socket
+      volumes:
+        - name: docker-sock
+          hostPath:
+            path: /var/run/docker.sock
+            type: Socket
+        - name: projects-storage
+          emptyDir: {}
+      containers:
+        - name: worker
+          image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag | default .Values.global.imageTag }}"
+          imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
+          volumeMounts:
+            - name: docker-sock
+              mountPath: /var/run/docker.sock
+            - name: projects-storage
+              mountPath: /tmp/zyphron/projects
+          envFrom:
+            - configMapRef:
+                name: zyphron-api-config
+            - secretRef:
+                name: zyphron-api-secrets
+          env:
+            - name: DATABASE_URL
+              value: "postgresql://{{ .Values.postgresql.auth.username }}:$(PG_PASSWORD)@{{ .Release.Name }}-postgresql:5432/{{ .Values.postgresql.auth.database }}"
+            - name: REDIS_URL
+              value: "redis://{{ .Release.Name }}-redis-master:6379/0"
+            {{- if .Values.kafka.enabled }}
+            - name: KAFKA_BROKERS
+              value: "{{ .Release.Name }}-kafka:9092"
+            {{- end }}
+            - name: DEPLOYMENT_MODE
+              value: "k8s"
+            - name: K8S_IN_CLUSTER
+              value: "true"
+            - name: PROJECTS_DIR
+              value: "/tmp/zyphron/projects"
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}

@@ -3,6 +3,7 @@
 // ===========================================
 
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { scanEnvVars } from '@/services/env-scanner/index.js';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma.js';
 import { createLogger } from '@/lib/logger.js';
@@ -18,6 +19,7 @@ const logger = createLogger('projects');
 
 const createProjectSchema = z.object({
   name: z.string().min(1).max(100),
+  slug: z.string().min(2).max(120).regex(/^[a-z0-9-]+$/).optional(),
   repositoryUrl: z.string().url(),
   branch: z.string().default('main'),
   rootDirectory: z.string().optional(),
@@ -170,13 +172,10 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
       teamId = team.id;
     }
 
-    // Generate unique subdomain
-    const slug = data.name
+    const baseSlug = (data.slug || data.name)
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '');
-    
-    const subdomain = `${slug}-${nanoid(6)}`.toLowerCase();
+      .replace(/^-|-$/g, '') || `project-${nanoid(4)}`;
 
     // Detect repository provider
     let repositoryProvider: 'GITHUB' | 'GITLAB' | 'BITBUCKET' = 'GITHUB';
@@ -187,24 +186,49 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
     }
 
     try {
-      const project = await prisma.project.create({
-        data: {
-          name: data.name,
-          slug,
-          repositoryUrl: data.repositoryUrl,
-          repositoryProvider,
-          branch: data.branch,
-          rootDirectory: data.rootDirectory,
-          buildCommand: data.buildCommand,
-          installCommand: data.installCommand,
-          startCommand: data.startCommand,
-          outputDirectory: data.outputDirectory,
-          autoDeploy: data.autoDeploy,
-          subdomain,
-          userId,
-          teamId,
-        },
-      });
+      let project: Awaited<ReturnType<typeof prisma.project.create>> | null = null;
+      let slug = baseSlug;
+      let subdomain = `${slug}-${nanoid(6)}`.toLowerCase();
+
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        try {
+          project = await prisma.project.create({
+            data: {
+              name: data.name,
+              slug,
+              repositoryUrl: data.repositoryUrl,
+              repositoryProvider,
+              branch: data.branch,
+              rootDirectory: data.rootDirectory,
+              buildCommand: data.buildCommand,
+              installCommand: data.installCommand,
+              startCommand: data.startCommand,
+              outputDirectory: data.outputDirectory,
+              autoDeploy: data.autoDeploy,
+              subdomain,
+              userId,
+              teamId,
+            },
+          });
+          break;
+        } catch (error: unknown) {
+          if ((error as { code?: string }).code !== 'P2002') {
+            throw error;
+          }
+          slug = `${baseSlug}-${nanoid(4)}`;
+          subdomain = `${slug}-${nanoid(6)}`.toLowerCase();
+        }
+      }
+
+      if (!project) {
+        return reply.status(409).send({
+          success: false,
+          error: {
+            code: 'DUPLICATE_PROJECT',
+            message: 'A unique project slug could not be generated. Try a different name.',
+          },
+        });
+      }
 
       logger.info({ projectId: project.id, userId }, 'Project created');
       await createAuditLog({
@@ -406,5 +430,61 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
       success: true,
       data: { message: 'Project deleted successfully' },
     });
+  });
+
+  // ===========================================
+  // SCAN ENV VARS — detect required env vars from a public repo
+  // ===========================================
+
+  app.post('/scan-env', {
+    onRequest: [app.authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const body = request.body as { repositoryUrl?: string };
+    const { repositoryUrl } = body;
+
+    if (!repositoryUrl) {
+      return reply.status(400).send({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'repositoryUrl is required' },
+      });
+    }
+
+    // Validate it looks like a public git URL
+    if (!/^https?:\/\/(github\.com|gitlab\.com|bitbucket\.org)\/.+/.test(repositoryUrl)) {
+      return reply.status(400).send({
+        success: false,
+        error: { code: 'INVALID_URL', message: 'Only GitHub, GitLab and Bitbucket public repos are supported' },
+      });
+    }
+
+    try {
+      const { config: appConfig } = await import('@/config/index.js');
+      const tmpDir = `${appConfig.deployment.projectsDir}/scan-${Date.now()}`;
+      const { execFile } = await import('node:child_process');
+      const { promisify } = await import('node:util');
+      const execFileAsync = promisify(execFile);
+
+      // Shallow clone just enough to scan
+      await execFileAsync('git', ['clone', '--depth', '1', '--single-branch', repositoryUrl, tmpDir], {
+        timeout: 60_000,
+      });
+
+      const scanResult = await scanEnvVars(tmpDir);
+
+      // Cleanup clone
+      const { rm } = await import('node:fs/promises');
+      await rm(tmpDir, { recursive: true, force: true });
+
+      return reply.send({
+        success: true,
+        data: scanResult,
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return reply.status(500).send({
+        success: false,
+        error: { code: 'SCAN_FAILED', message: `Failed to scan repo: ${msg}` },
+      });
+    }
   });
 }
