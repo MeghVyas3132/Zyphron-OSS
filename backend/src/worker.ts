@@ -39,7 +39,7 @@ const consumers: (Consumer | null)[] = [];
 const gitService = getGitService(config.deployment.projectsDir || '/tmp/zyphron/repos');
 const builderService = getBuilderService(config.docker.registry || 'localhost:5000');
 const deployerService = getDeployerService(
-  'zyphron-network',
+  process.env.DOCKER_NETWORK || 'zyphron-network',
   config.deployment.baseDomain || 'localhost',
   config.deployment.useHttps
 );

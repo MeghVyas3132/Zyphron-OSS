@@ -112,13 +112,14 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: 7d
       RESEND_API_KEYS: ${RESEND_API_KEYS:-}
-      RESEND_FROM: ${RESEND_FROM:-Zyphron <noreply@zyphron.app>}
+      RESEND_FROM: ${RESEND_FROM:-Zyphron <noreply@${DOMAIN}>}
       GROQ_API_KEYS: ${GROQ_API_KEYS:-}
       GROQ_MODEL: llama-3.3-70b-versatile
       BASE_DOMAIN: ${DOMAIN}
       USE_HTTPS: "true"
       CONTAINER_REGISTRY: localhost:5000
       DEPLOYMENT_MODE: docker
+      DOCKER_NETWORK: zyphron_zyphron
       PROJECTS_DIR: /app/projects
       PROMETHEUS_URL: http://prometheus:9090
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
@@ -156,8 +157,10 @@ services:
       GROQ_API_KEYS: ${GROQ_API_KEYS:-}
       GROQ_MODEL: llama-3.3-70b-versatile
       BASE_DOMAIN: ${DOMAIN}
+      USE_HTTPS: "true"
       CONTAINER_REGISTRY: localhost:5000
       DEPLOYMENT_MODE: docker
+      DOCKER_NETWORK: zyphron_zyphron
       PROJECTS_DIR: /app/projects
       LOG_LEVEL: info
     volumes:
@@ -173,17 +176,18 @@ services:
     environment:
       NODE_ENV: production
       NEXT_PUBLIC_API_URL: https://api.${DOMAIN}
-      NEXT_PUBLIC_APP_URL: https://app.${DOMAIN}
-      NEXT_PUBLIC_GRAFANA_URL: https://app.${DOMAIN}/grafana
+      NEXT_PUBLIC_APP_URL: https://${DOMAIN}
+      NEXT_PUBLIC_GRAFANA_URL: https://${DOMAIN}/grafana
     networks: [zyphron]
     labels:
       - traefik.enable=true
-      - traefik.http.routers.frontend.rule=Host(`app.${DOMAIN}`)
+      # Root domain → dashboard
+      - traefik.http.routers.frontend.rule=Host(`${DOMAIN}`)
       - traefik.http.routers.frontend.entrypoints=websecure
       - traefik.http.routers.frontend.tls.certresolver=letsencrypt
       - traefik.http.services.frontend.loadbalancer.server.port=3000
-      # /grafana proxy to Grafana service
-      - traefik.http.routers.grafana-path.rule=Host(`app.${DOMAIN}`) && PathPrefix(`/grafana`)
+      # Grafana at /grafana path
+      - traefik.http.routers.grafana-path.rule=Host(`${DOMAIN}`) && PathPrefix(`/grafana`)
       - traefik.http.routers.grafana-path.entrypoints=websecure
       - traefik.http.routers.grafana-path.tls.certresolver=letsencrypt
       - traefik.http.routers.grafana-path.service=grafana-svc
