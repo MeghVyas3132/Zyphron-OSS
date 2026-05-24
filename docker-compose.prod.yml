@@ -1,0 +1,235 @@
+version: '3.9'
+
+# =============================================================
+# Zyphron — Production Docker Compose
+# Tested on: Amazon Linux 2023 / Ubuntu 22.04
+# Memory target: fits comfortably on 8 GB (m7i-flex.large)
+# =============================================================
+
+networks:
+  zyphron:
+    driver: bridge
+
+volumes:
+  pg_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+  registry_data:
+  projects_data:
+
+services:
+
+  # ─── Reverse Proxy ──────────────────────────────────────────
+  traefik:
+    image: traefik:v3.0
+    restart: unless-stopped
+    mem_limit: 128m
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=zyphron
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-admin@example.com}
+      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+      - --log.level=WARN
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./docker/traefik/letsencrypt:/letsencrypt
+    networks: [zyphron]
+
+  # ─── Database ────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    mem_limit: 512m
+    environment:
+      POSTGRES_USER: zyphron
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-zyphron_secret}
+      POSTGRES_DB: zyphron
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks: [zyphron]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zyphron"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Cache ───────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    mem_limit: 256m
+    command: redis-server --maxmemory 200mb --maxmemory-policy allkeys-lru --save ""
+    volumes:
+      - redis_data:/data
+    networks: [zyphron]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      retries: 5
+
+  # ─── Container Registry (for user project images) ────────────
+  registry:
+    image: registry:2
+    restart: unless-stopped
+    mem_limit: 128m
+    environment:
+      REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY: /var/lib/registry
+    volumes:
+      - registry_data:/var/lib/registry
+    ports:
+      - "5000:5000"
+    networks: [zyphron]
+
+  # ─── Backend API ─────────────────────────────────────────────
+  api:
+    image: ${REGISTRY_URL:-localhost:5000}/zyphron-api:latest
+    restart: unless-stopped
+    mem_limit: 512m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://zyphron:${PG_PASSWORD:-zyphron_secret}@postgres:5432/zyphron?schema=public
+      REDIS_URL: redis://redis:6379
+      KAFKA_ENABLED: "false"
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: 7d
+      RESEND_API_KEYS: ${RESEND_API_KEYS:-}
+      RESEND_FROM: ${RESEND_FROM:-Zyphron <noreply@zyphron.app>}
+      GROQ_API_KEYS: ${GROQ_API_KEYS:-}
+      GROQ_MODEL: llama-3.3-70b-versatile
+      BASE_DOMAIN: ${DOMAIN}
+      USE_HTTPS: "true"
+      CONTAINER_REGISTRY: localhost:5000
+      DEPLOYMENT_MODE: docker
+      PROJECTS_DIR: /app/projects
+      PROMETHEUS_URL: http://prometheus:9090
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      ALLOW_DEV_TOKEN_BYPASS: "false"
+      LOG_LEVEL: info
+    volumes:
+      - projects_data:/app/projects
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [zyphron]
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.api.rule=Host(`api.${DOMAIN}`)
+      - traefik.http.routers.api.entrypoints=websecure
+      - traefik.http.routers.api.tls.certresolver=letsencrypt
+      - traefik.http.services.api.loadbalancer.server.port=3000
+
+  # ─── Background Worker ───────────────────────────────────────
+  worker:
+    image: ${REGISTRY_URL:-localhost:5000}/zyphron-worker:latest
+    restart: unless-stopped
+    mem_limit: 1g
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://zyphron:${PG_PASSWORD:-zyphron_secret}@postgres:5432/zyphron?schema=public
+      REDIS_URL: redis://redis:6379
+      KAFKA_ENABLED: "false"
+      JWT_SECRET: ${JWT_SECRET}
+      RESEND_API_KEYS: ${RESEND_API_KEYS:-}
+      GROQ_API_KEYS: ${GROQ_API_KEYS:-}
+      GROQ_MODEL: llama-3.3-70b-versatile
+      BASE_DOMAIN: ${DOMAIN}
+      CONTAINER_REGISTRY: localhost:5000
+      DEPLOYMENT_MODE: docker
+      PROJECTS_DIR: /app/projects
+      LOG_LEVEL: info
+    volumes:
+      - projects_data:/app/projects
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [zyphron]
+
+  # ─── Frontend ────────────────────────────────────────────────
+  frontend:
+    image: ${REGISTRY_URL:-localhost:5000}/zyphron-frontend:latest
+    restart: unless-stopped
+    mem_limit: 256m
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: https://api.${DOMAIN}
+      NEXT_PUBLIC_APP_URL: https://app.${DOMAIN}
+      NEXT_PUBLIC_GRAFANA_URL: https://app.${DOMAIN}/grafana
+    networks: [zyphron]
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.frontend.rule=Host(`app.${DOMAIN}`)
+      - traefik.http.routers.frontend.entrypoints=websecure
+      - traefik.http.routers.frontend.tls.certresolver=letsencrypt
+      - traefik.http.services.frontend.loadbalancer.server.port=3000
+      # /grafana proxy to Grafana service
+      - traefik.http.routers.grafana-path.rule=Host(`app.${DOMAIN}`) && PathPrefix(`/grafana`)
+      - traefik.http.routers.grafana-path.entrypoints=websecure
+      - traefik.http.routers.grafana-path.tls.certresolver=letsencrypt
+      - traefik.http.routers.grafana-path.service=grafana-svc
+      - traefik.http.services.grafana-svc.loadbalancer.server.port=3000
+
+  # ─── Observability ───────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    restart: unless-stopped
+    mem_limit: 512m
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --web.enable-lifecycle
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks: [zyphron]
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    restart: unless-stopped
+    mem_limit: 256m
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_NAME: "Main Org."
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_AUTH_DISABLE_SIGNOUT_MENU: "true"
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+      GF_SECURITY_COOKIE_SAMESITE: "none"
+      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/grafana"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/zyphron/sre-overview.json
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards/zyphron:ro
+    networks: [zyphron]
+
+  loki:
+    image: grafana/loki:2.9.0
+    restart: unless-stopped
+    mem_limit: 256m
+    command: -config.file=/etc/loki/loki.yml
+    volumes:
+      - ./docker/loki/loki.yml:/etc/loki/loki.yml:ro
+      - loki_data:/loki
+    networks: [zyphron]
