@@ -182,8 +182,8 @@ ok "Worker image built"
 log "Building Frontend image…"
 docker build -t localhost:5000/zyphron-frontend:latest \
   --build-arg NEXT_PUBLIC_API_URL="https://api.${DOMAIN}" \
-  --build-arg NEXT_PUBLIC_APP_URL="https://app.${DOMAIN}" \
-  --build-arg NEXT_PUBLIC_GRAFANA_URL="https://app.${DOMAIN}/grafana" \
+  --build-arg NEXT_PUBLIC_APP_URL="https://${DOMAIN}" \
+  --build-arg NEXT_PUBLIC_GRAFANA_URL="https://${DOMAIN}/grafana" \
   -f frontend/Dockerfile \
   frontend/
 ok "Frontend image built"
