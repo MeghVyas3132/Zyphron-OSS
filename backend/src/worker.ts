@@ -4,7 +4,7 @@
 
 import { createLogger } from './lib/logger.js';
 import { config } from './config/index.js';
-import { connectRedis, disconnectRedis } from './lib/redis.js';
+import { connectRedis, disconnectRedis, subscribe } from './lib/redis.js';
 import { createConsumer, disconnectKafka, TOPICS } from './lib/kafka.js';
 import { prisma } from './lib/prisma.js';
 import { Consumer } from 'kafkajs';
@@ -1503,6 +1503,47 @@ async function main(): Promise<void> {
     consumers.push(buildLogsConsumer);
     logger.info('Build logs consumer started');
 
+    // ─── Redis pub/sub fallback (used when Kafka is disabled) ───
+    // The API always publishes to Redis pub/sub as a fallback after Kafka.
+    // Subscribe here so deployments work without Kafka.
+    await subscribe('deployment:created', (raw: unknown) => {
+      const { deploymentId } = raw as { deploymentId: string };
+      logger.info({ deploymentId }, 'deployment:created via Redis pub/sub');
+
+      prisma.deployment.findUnique({
+        where: { id: deploymentId },
+        select: { projectId: true, branch: true },
+      }).then(dep => {
+        if (!dep) {
+          logger.error({ deploymentId }, 'Deployment not found for Redis event');
+          return;
+        }
+        return handleDeploymentEvent('deployments', {
+          eventType: 'DEPLOYMENT_CREATED',
+          deploymentId,
+          projectId: dep.projectId,
+          branch: dep.branch || 'main',
+          timestamp: new Date().toISOString(),
+        });
+      }).catch(err => {
+        logger.error({ err, deploymentId }, 'Error handling deployment:created via Redis');
+      });
+    });
+
+    await subscribe('deployment:cancelled', (raw: unknown) => {
+      const { deploymentId } = raw as { deploymentId: string };
+      logger.info({ deploymentId }, 'deployment:cancelled via Redis pub/sub');
+
+      handleDeploymentEvent('deployments', {
+        eventType: 'DEPLOYMENT_CANCELLED',
+        deploymentId,
+        timestamp: new Date().toISOString(),
+      }).catch(err => {
+        logger.error({ err, deploymentId }, 'Error handling deployment:cancelled via Redis');
+      });
+    });
+
+    logger.info('Redis pub/sub fallback subscribers registered');
     logger.info('Zyphron Worker started and listening for events');
 
     // Handle shutdown signals

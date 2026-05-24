@@ -13,6 +13,10 @@ import {
   CheckCircle,
   XCircle,
   Clock,
+  BarChart3,
+  Zap,
+  Server,
+  ExternalLink,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -42,31 +46,27 @@ const itemVariants = {
   show: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.19, 1, 0.22, 1] as const } },
 };
 
-// Generates deterministic mock time-series data for when Prometheus is unavailable
-function mockTimeSeries(points: number, baseVal: number, variance: number) {
-  const now = Date.now();
-  return Array.from({ length: points }, (_, i) => {
-    const t = new Date(now - (points - i) * 60_000);
-    return {
-      time: t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      value: Math.max(0, baseVal + (Math.sin(i * 0.4) * variance) + (Math.random() * variance * 0.3)),
-    };
-  });
+// ─── Grafana panel config ─────────────────────────────────────────────────────
+const GRAFANA_BASE = process.env.NEXT_PUBLIC_GRAFANA_URL ?? '';
+
+const GRAFANA_PANELS = [
+  { id: 'sre', label: 'SRE Overview', icon: Activity, uid: 'zyphron-sre', description: 'Request rate, latency percentiles, error rate, CPU/RAM' },
+  { id: 'deployments', label: 'Deployments', icon: Zap, uid: 'zyphron-deployments', description: 'Build times, success rate, deployment frequency' },
+  { id: 'stress', label: 'Load Tests', icon: Server, uid: 'zyphron-stress', description: 'k6 results: p50/p95/p99, error rate, req/s' },
+  { id: 'nodes', label: 'Node Metrics', icon: BarChart3, grafanaId: 1860, description: 'CPU, memory, disk, network per node' },
+] as const;
+
+type PanelId = (typeof GRAFANA_PANELS)[number]['id'];
+
+function grafanaUrl(dash: (typeof GRAFANA_PANELS)[number]): string {
+  if (!GRAFANA_BASE) return '';
+  if ('grafanaId' in dash && dash.grafanaId) {
+    return `${GRAFANA_BASE}/d-solo/${dash.grafanaId}?orgId=1&refresh=30s&kiosk`;
+  }
+  return `${GRAFANA_BASE}/d/${'uid' in dash ? dash.uid : ''}?orgId=1&refresh=30s&kiosk`;
 }
 
-function mockLatencySeries(points: number) {
-  const now = Date.now();
-  return Array.from({ length: points }, (_, i) => {
-    const t = new Date(now - (points - i) * 60_000);
-    const base = 120 + Math.sin(i * 0.3) * 40;
-    return {
-      time: t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      p50: Math.round(base * 0.5 + Math.random() * 10),
-      p95: Math.round(base + Math.random() * 30),
-      p99: Math.round(base * 1.6 + Math.random() * 50),
-    };
-  });
-}
+// ─── Fallback data (shown only when no real data exists) ─────────────────────
 
 type TraceRow = {
   id: string;
@@ -89,9 +89,26 @@ const fallbackTraces: TraceRow[] = [
   { id: 'ghi789', service: 'payment-service', operation: 'POST /api/charge', duration: 350, status: 'error', timestamp: '8 min ago' },
 ];
 
+// ─── Metric card ─────────────────────────────────────────────────────────────
+function MetricCard({ title, value, change, icon: Icon }: { title: string; value: string; change: string; icon: React.ElementType }) {
+  return (
+    <div className="premium-panel premium-card-hover p-4">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-sm text-muted-foreground">{title}</span>
+        <Icon className="h-4 w-4 text-muted-foreground" />
+      </div>
+      <p className="text-2xl font-semibold">{value}</p>
+      <p className="text-xs text-muted-foreground mt-1">{change}</p>
+    </div>
+  );
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
 export default function ObservabilityPage() {
   const [timeRange, setTimeRange] = useState('1h');
   const [selectedProjectId, setSelectedProjectId] = useState('');
+  const [activePanel, setActivePanel] = useState<PanelId>('sre');
+  const [iframeKey, setIframeKey] = useState(0);
   const { data: projectResponse } = useProjects({ page: 1, limit: 100 });
   const createAlert = useCreateAlert();
 
@@ -104,129 +121,202 @@ export default function ObservabilityPage() {
 
   const effectiveProjectId = selectedProjectId || projects[0]?.id || '';
 
-  const { isLoading: loadingMetrics, refetch } = useMetrics({
-    projectId: effectiveProjectId,
-    period: timeRange,
-  });
+  const { data: metricsData, isLoading: loadingMetrics, refetch } = useMetrics({ projectId: effectiveProjectId, period: timeRange });
   const { data: traces } = useTraces({ projectId: effectiveProjectId, limit: 10 });
   const { data: alerts } = useAlerts(effectiveProjectId);
 
-  const requestData = useMemo(() => mockTimeSeries(30, 1200, 300), []);
-  const latencyData = useMemo(() => mockLatencySeries(30), []);
+  // ─── Build real time-series from metrics API response ────────────────────
+  const requestData = useMemo(() => {
+    const raw = (metricsData as { requestsTimeSeries?: { time: string; value: number }[] } | undefined)?.requestsTimeSeries;
+    if (raw && raw.length > 0) return raw;
+    return null;
+  }, [metricsData]);
 
-  if (loadingMetrics) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      </div>
-    );
-  }
+  const latencyData = useMemo(() => {
+    const raw = (metricsData as { latencyTimeSeries?: { time: string; p50: number; p95: number; p99: number }[] } | undefined)?.latencyTimeSeries;
+    if (raw && raw.length > 0) return raw;
+    return null;
+  }, [metricsData]);
+
+  const currentPanel = GRAFANA_PANELS.find((p) => p.id === activePanel)!;
+  const panelUrl = grafanaUrl(currentPanel);
 
   const alertRows = alerts || fallbackAlerts;
   const traceRows = (traces as TraceRow[] | undefined) || fallbackTraces;
 
   return (
-    <motion.div variants={containerVariants} initial="hidden" animate="show" className="space-y-6">
+    <motion.div variants={containerVariants} initial="hidden" animate="show" className="space-y-8">
+
+      {/* ── Header ── */}
       <motion.div variants={itemVariants} className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-semibold flex items-center gap-3 mono-text-gradient">
             <Activity className="h-8 w-8" />
             Observability
           </h1>
-          <p className="text-muted-foreground mt-1">
-            Metrics, traces, and alerting telemetry across your services.
-          </p>
+          <p className="text-muted-foreground mt-1">Metrics, traces, alerts and live Grafana dashboards.</p>
         </div>
         <div className="flex gap-2">
-          <div className="flex gap-2">
-            <select
-              value={effectiveProjectId}
-              onChange={(e) => setSelectedProjectId(e.target.value)}
-              className="px-3 py-2 border border-input rounded-xl bg-card text-sm min-w-[180px]"
-            >
-              {projects.length === 0 && <option value="">No projects</option>}
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-            <select
-              value={timeRange}
-              onChange={(e) => setTimeRange(e.target.value)}
-              className="px-3 py-2 border border-input rounded-xl bg-card text-sm"
-            >
-              <option value="15m">Last 15 minutes</option>
-              <option value="1h">Last hour</option>
-              <option value="6h">Last 6 hours</option>
-              <option value="24h">Last 24 hours</option>
-              <option value="7d">Last 7 days</option>
-            </select>
-          </div>
-          <Button onClick={() => refetch()} variant="outline" size="icon">
-            <RefreshCw className="h-4 w-4" />
+          <select
+            value={effectiveProjectId}
+            onChange={(e) => setSelectedProjectId(e.target.value)}
+            className="px-3 py-2 border border-input rounded-xl bg-card text-sm min-w-[180px]"
+          >
+            {projects.length === 0 && <option value="">No projects</option>}
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>{project.name}</option>
+            ))}
+          </select>
+          <select
+            value={timeRange}
+            onChange={(e) => setTimeRange(e.target.value)}
+            className="px-3 py-2 border border-input rounded-xl bg-card text-sm"
+          >
+            <option value="15m">Last 15 min</option>
+            <option value="1h">Last hour</option>
+            <option value="6h">Last 6 hours</option>
+            <option value="24h">Last 24 hours</option>
+            <option value="7d">Last 7 days</option>
+          </select>
+          <Button onClick={() => { void refetch(); setIframeKey((k) => k + 1); }} variant="outline" size="icon">
+            <RefreshCw className={`h-4 w-4 ${loadingMetrics ? 'animate-spin' : ''}`} />
           </Button>
         </div>
       </motion.div>
 
+      {/* ── KPI cards ── */}
       <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <MetricCard title="Request Rate" value="1.2K/s" change="↑ 12% from last hour" icon={LineChart} />
-        <MetricCard title="Error Rate" value="0.12%" change="↓ 0.05% from last hour" icon={Activity} />
-        <MetricCard title="P95 Latency" value="45ms" change="↑ 5ms from last hour" icon={Clock} />
+        <MetricCard title="Request Rate" value={(metricsData as { requestRate?: string } | undefined)?.requestRate ?? '—'} change="per second" icon={Activity} />
+        <MetricCard title="Error Rate" value={(metricsData as { errorRate?: string } | undefined)?.errorRate ?? '—'} change="of all requests" icon={XCircle} />
+        <MetricCard title="P95 Latency" value={(metricsData as { p95Latency?: string } | undefined)?.p95Latency ?? '—'} change="response time" icon={Clock} />
         <MetricCard title="Active Alerts" value={String(alertRows.filter((a) => a.status === 'firing').length)} change={`of ${alertRows.length} total`} icon={Bell} />
       </motion.div>
 
+      {/* ── Time-series charts ── */}
       <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Request Volume */}
         <div className="premium-panel p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold">Request Volume</h3>
-            <Button variant="ghost" size="sm" onClick={() => toast.info('Chart configuration is not exposed yet.')}>
-              <Settings className="h-4 w-4" />
-            </Button>
           </div>
           <div className="h-48">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={requestData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="reqGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="currentColor" stopOpacity={0.2} />
-                    <stop offset="95%" stopColor="currentColor" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.4} />
-                <XAxis dataKey="time" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} interval={4} />
-                <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} width={36} />
-                <Tooltip contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }} labelStyle={{ color: 'hsl(var(--foreground))' }} />
-                <Area type="monotone" dataKey="value" stroke="hsl(var(--foreground))" fill="url(#reqGrad)" strokeWidth={1.5} dot={false} name="req/s" />
-              </AreaChart>
-            </ResponsiveContainer>
+            {requestData ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={requestData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="reqGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="currentColor" stopOpacity={0.2} />
+                      <stop offset="95%" stopColor="currentColor" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.4} />
+                  <XAxis dataKey="time" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} interval={4} />
+                  <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} width={36} />
+                  <Tooltip contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }} labelStyle={{ color: 'hsl(var(--foreground))' }} />
+                  <Area type="monotone" dataKey="value" stroke="hsl(var(--foreground))" fill="url(#reqGrad)" strokeWidth={1.5} dot={false} name="req/s" />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center gap-2 text-muted-foreground">
+                <BarChart3 className="h-8 w-8 opacity-30" />
+                <p className="text-sm">No data yet — deploy a project to see traffic</p>
+              </div>
+            )}
           </div>
         </div>
 
+        {/* Response Times */}
         <div className="premium-panel p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold">Response Times</h3>
-            <Button variant="ghost" size="sm" onClick={() => toast.info('Chart configuration is not exposed yet.')}>
-              <Settings className="h-4 w-4" />
-            </Button>
           </div>
           <div className="h-48">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={latencyData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.4} />
-                <XAxis dataKey="time" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} interval={4} />
-                <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} width={36} unit="ms" />
-                <Tooltip contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }} labelStyle={{ color: 'hsl(var(--foreground))' }} formatter={(v: number) => [`${v}ms`]} />
-                <ReferenceLine y={200} stroke="hsl(var(--foreground))" strokeDasharray="4 4" strokeOpacity={0.35} label={{ value: 'SLA', fontSize: 10, fill: 'hsl(var(--muted-foreground))', position: 'insideTopRight' }} />
-                <Line type="monotone" dataKey="p50" stroke="hsl(var(--foreground))" strokeWidth={1.5} strokeOpacity={0.45} dot={false} name="p50" />
-                <Line type="monotone" dataKey="p95" stroke="hsl(var(--foreground))" strokeWidth={1.5} dot={false} name="p95" />
-                <Line type="monotone" dataKey="p99" stroke="hsl(var(--foreground))" strokeWidth={1.5} strokeOpacity={0.7} strokeDasharray="3 3" dot={false} name="p99" />
-              </LineChart>
-            </ResponsiveContainer>
+            {latencyData ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={latencyData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.4} />
+                  <XAxis dataKey="time" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} interval={4} />
+                  <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} width={36} unit="ms" />
+                  <Tooltip contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }} labelStyle={{ color: 'hsl(var(--foreground))' }} formatter={(v: number) => [`${v}ms`]} />
+                  <ReferenceLine y={200} stroke="hsl(var(--foreground))" strokeDasharray="4 4" strokeOpacity={0.35} label={{ value: 'SLA', fontSize: 10, fill: 'hsl(var(--muted-foreground))', position: 'insideTopRight' }} />
+                  <Line type="monotone" dataKey="p50" stroke="hsl(var(--foreground))" strokeWidth={1.5} strokeOpacity={0.45} dot={false} name="p50" />
+                  <Line type="monotone" dataKey="p95" stroke="hsl(var(--foreground))" strokeWidth={1.5} dot={false} name="p95" />
+                  <Line type="monotone" dataKey="p99" stroke="hsl(var(--foreground))" strokeWidth={1.5} strokeOpacity={0.7} strokeDasharray="3 3" dot={false} name="p99" />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center gap-2 text-muted-foreground">
+                <Activity className="h-8 w-8 opacity-30" />
+                <p className="text-sm">No latency data yet</p>
+              </div>
+            )}
           </div>
         </div>
       </motion.div>
 
+      {/* ── Embedded Grafana Dashboards ── */}
+      {GRAFANA_BASE && (
+        <motion.div variants={itemVariants} className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold flex items-center gap-2">
+              <BarChart3 className="h-5 w-5" />
+              Live Dashboards
+            </h2>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => window.open(panelUrl.replace('&kiosk', ''), '_blank')}
+            >
+              <ExternalLink className="h-4 w-4" />
+              Open in Grafana
+            </Button>
+          </div>
+
+          {/* Panel selector */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {GRAFANA_PANELS.map((panel) => {
+              const Icon = panel.icon;
+              return (
+                <button
+                  key={panel.id}
+                  onClick={() => setActivePanel(panel.id)}
+                  className={`premium-panel premium-card-hover p-4 text-left transition-all ${
+                    activePanel === panel.id ? 'ring-2 ring-foreground/40 bg-foreground/5' : 'hover:bg-foreground/3'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <Icon className="h-4 w-4 text-foreground/60" />
+                    <span className="text-sm font-medium">{panel.label}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-snug">{panel.description}</p>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Iframe */}
+          <div className="premium-panel overflow-hidden" style={{ minHeight: '520px' }}>
+            <div className="flex items-center justify-between px-4 py-2 border-b border-border/40 bg-card/60">
+              <div className="flex items-center gap-2">
+                <currentPanel.icon className="h-4 w-4 text-foreground/60" />
+                <span className="text-sm font-medium">{currentPanel.label}</span>
+              </div>
+              <span className="text-xs text-muted-foreground">Auto-refreshes every 30s</span>
+            </div>
+            <iframe
+              key={iframeKey}
+              src={panelUrl}
+              className="w-full bg-transparent"
+              style={{ height: '480px', border: 'none' }}
+              title={currentPanel.label}
+              sandbox="allow-scripts allow-same-origin allow-popups"
+            />
+          </div>
+        </motion.div>
+      )}
+
+      {/* ── Alerts ── */}
       <motion.div variants={itemVariants}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold flex items-center gap-2">
@@ -236,22 +326,13 @@ export default function ObservabilityPage() {
           <Button
             size="sm"
             onClick={async () => {
-              if (!effectiveProjectId) {
-                toast.error('Select a project first.');
-                return;
-              }
+              if (!effectiveProjectId) { toast.error('Select a project first.'); return; }
               try {
                 await createAlert.mutateAsync({
                   projectId: effectiveProjectId,
                   name: `Latency alert ${new Date().toISOString().slice(11, 19)}`,
                   severity: 'warning',
-                  condition: {
-                    metric: 'latency',
-                    operator: '>',
-                    threshold: 1000,
-                    duration: 60,
-                    aggregation: 'p95',
-                  },
+                  condition: { metric: 'latency', operator: '>', threshold: 1000, duration: 60, aggregation: 'p95' },
                   channels: [{ type: 'in-app', config: {}, enabled: true }],
                 });
                 toast.success('Alert created.');
@@ -281,14 +362,8 @@ export default function ObservabilityPage() {
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                <span className="px-2 py-1 rounded text-xs font-medium bg-foreground/10 text-foreground/80">
-                  {alert.severity}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => toast.info('Alert settings editor is not wired yet.')}
-                >
+                <span className="px-2 py-1 rounded text-xs font-medium bg-foreground/10 text-foreground/80">{alert.severity}</span>
+                <Button variant="ghost" size="sm" onClick={() => toast.info('Alert settings editor coming soon.')}>
                   <Settings className="h-4 w-4" />
                 </Button>
               </div>
@@ -297,6 +372,7 @@ export default function ObservabilityPage() {
         </div>
       </motion.div>
 
+      {/* ── Traces ── */}
       <motion.div variants={itemVariants}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold">Recent Traces</h2>
@@ -305,12 +381,11 @@ export default function ObservabilityPage() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input placeholder="Search traces..." className="pl-10 w-64 h-10 rounded-xl" />
             </div>
-            <Button variant="outline" size="icon" onClick={() => toast.info('Trace filters are not wired yet.')}>
+            <Button variant="outline" size="icon" onClick={() => toast.info('Trace filters coming soon.')}>
               <Filter className="h-4 w-4" />
             </Button>
           </div>
         </div>
-
         <div className="premium-panel overflow-hidden">
           <table className="w-full">
             <thead className="bg-muted/35">
@@ -344,28 +419,5 @@ export default function ObservabilityPage() {
         </div>
       </motion.div>
     </motion.div>
-  );
-}
-
-function MetricCard({
-  title,
-  value,
-  change,
-  icon: Icon,
-}: {
-  title: string;
-  value: string;
-  change: string;
-  icon: React.ElementType;
-}) {
-  return (
-    <div className="premium-panel premium-card-hover p-4">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-sm text-muted-foreground">{title}</span>
-        <Icon className="h-4 w-4 text-muted-foreground" />
-      </div>
-      <p className="text-2xl font-semibold">{value}</p>
-      <p className="text-xs text-muted-foreground mt-1">{change}</p>
-    </div>
   );
 }

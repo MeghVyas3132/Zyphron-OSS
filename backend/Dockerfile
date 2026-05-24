@@ -15,6 +15,7 @@ RUN npm ci
 # ─── Stage 2: build ──────────────────────────────────────────
 FROM node:${NODE_VERSION}-alpine AS builder
 WORKDIR /app
+RUN apk add --no-cache openssl
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npx prisma generate
@@ -25,15 +26,15 @@ FROM node:${NODE_VERSION}-alpine AS api
 WORKDIR /app
 ENV NODE_ENV=production
 
-RUN apk add --no-cache dumb-init docker-cli
+RUN apk add --no-cache dumb-init docker-cli openssl
 
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=deps /app/node_modules_prod ./node_modules
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY prisma ./prisma
 COPY package.json ./
 
-RUN mkdir -p /app/projects
+RUN mkdir -p /app/projects && chown -R node:node /app/projects
 
 USER node
 EXPOSE 3000
@@ -45,15 +46,15 @@ FROM node:${NODE_VERSION}-alpine AS worker
 WORKDIR /app
 ENV NODE_ENV=production
 
-RUN apk add --no-cache dumb-init docker-cli
+RUN apk add --no-cache dumb-init docker-cli openssl git
 
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=deps /app/node_modules_prod ./node_modules
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY prisma ./prisma
 COPY package.json ./
 
-RUN mkdir -p /app/projects
+RUN mkdir -p /app/projects && chown -R node:node /app/projects
 
 USER node
 ENTRYPOINT ["dumb-init", "--"]

@@ -483,6 +483,18 @@ venv
       buildLogs.push(`Success Build completed in ${Math.round(duration / 1000)}s`);
       this.logMessage(`Build completed in ${Math.round(duration / 1000)}s`, onLog);
 
+      // Explicitly tag the image by its ID to ensure the tag is applied
+      // (the `t` parameter in buildImage is not always reliable with dockerode)
+      if (imageId) {
+        try {
+          const builtImage = this.docker.getImage(imageId);
+          await builtImage.tag({ repo: imageName, tag: imageTag });
+          logger.info({ imageId, imageName, imageTag }, 'Image explicitly tagged after build');
+        } catch (tagErr) {
+          logger.warn({ imageId, imageName, imageTag, error: tagErr instanceof Error ? tagErr.message : tagErr }, 'Explicit tagging after build failed (image may already be tagged)');
+        }
+      }
+
       logger.info({
         deploymentId,
         imageId,
@@ -533,7 +545,8 @@ venv
 
     try {
       const image = this.docker.getImage(fullImageName);
-      const stream = await image.push({});
+      // Pass explicit empty authconfig so Docker doesn't reject with "missing X-Registry-Auth"
+      const stream = await image.push({ authconfig: { serveraddress: this.registryUrl } });
 
       const digest = await new Promise<string>((resolve, reject) => {
         let lastDigest = '';

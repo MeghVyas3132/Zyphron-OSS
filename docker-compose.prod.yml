@@ -29,7 +29,7 @@ services:
     command:
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
-      - --providers.docker.network=zyphron
+      - --providers.docker.network=zyphron_zyphron
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
       - --entrypoints.web.http.redirections.entrypoint.to=websecure
@@ -126,6 +126,14 @@ services:
       ALLOW_DEV_TOKEN_BYPASS: "false"
       BOOTSTRAP_ADMIN_EMAILS: ${BOOTSTRAP_ADMIN_EMAILS:-}
       LOG_LEVEL: info
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GITHUB_CALLBACK_URL: ${GITHUB_CALLBACK_URL:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL:-}
+    group_add:
+      - "992"
     volumes:
       - projects_data:/app/projects
       - /var/run/docker.sock:/var/run/docker.sock
@@ -135,6 +143,7 @@ services:
       - traefik.http.routers.api.rule=Host(`api.${DOMAIN}`)
       - traefik.http.routers.api.entrypoints=websecure
       - traefik.http.routers.api.tls.certresolver=letsencrypt
+      - traefik.http.routers.api.service=api
       - traefik.http.services.api.loadbalancer.server.port=3000
 
   # ─── Background Worker ───────────────────────────────────────
@@ -163,6 +172,8 @@ services:
       DOCKER_NETWORK: zyphron_zyphron
       PROJECTS_DIR: /app/projects
       LOG_LEVEL: info
+    group_add:
+      - "992"
     volumes:
       - projects_data:/app/projects
       - /var/run/docker.sock:/var/run/docker.sock
@@ -181,17 +192,11 @@ services:
     networks: [zyphron]
     labels:
       - traefik.enable=true
-      # Root domain → dashboard
       - traefik.http.routers.frontend.rule=Host(`${DOMAIN}`)
       - traefik.http.routers.frontend.entrypoints=websecure
       - traefik.http.routers.frontend.tls.certresolver=letsencrypt
+      - traefik.http.routers.frontend.service=frontend
       - traefik.http.services.frontend.loadbalancer.server.port=3000
-      # Grafana at /grafana path
-      - traefik.http.routers.grafana-path.rule=Host(`${DOMAIN}`) && PathPrefix(`/grafana`)
-      - traefik.http.routers.grafana-path.entrypoints=websecure
-      - traefik.http.routers.grafana-path.tls.certresolver=letsencrypt
-      - traefik.http.routers.grafana-path.service=grafana-svc
-      - traefik.http.services.grafana-svc.loadbalancer.server.port=3000
 
   # ─── Observability ───────────────────────────────────────────
   prometheus:
@@ -228,6 +233,13 @@ services:
       - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./docker/grafana/dashboards:/var/lib/grafana/dashboards/zyphron:ro
     networks: [zyphron]
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.grafana.rule=Host(`${DOMAIN}`) && PathPrefix(`/grafana`)
+      - traefik.http.routers.grafana.entrypoints=websecure
+      - traefik.http.routers.grafana.tls.certresolver=letsencrypt
+      - traefik.http.routers.grafana.service=grafana
+      - traefik.http.services.grafana.loadbalancer.server.port=3000
 
   loki:
     image: grafana/loki:2.9.0

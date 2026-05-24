@@ -36,7 +36,6 @@ const navigation = [
   { name: 'Projects',     href: '/projects',    icon: FolderKanban },
   // Monitoring
   { name: 'Observability',href: '/observability',icon: Activity },
-  { name: 'Grafana',      href: '/grafana',     icon: BarChart3 },
   { name: 'Audit Logs',   href: '/audit',       icon: Shield },
   // DevOps
   { name: 'Load Testing', href: '/stress',      icon: Gauge },

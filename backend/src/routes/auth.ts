@@ -632,6 +632,95 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ===========================================
+  // GITHUB OAUTH CALLBACK (GET — browser redirect from GitHub)
+  // ===========================================
+
+  app.get('/github/callback', async (request: FastifyRequest, reply: FastifyReply) => {
+    const proto = config.deployment.useHttps ? 'https' : 'http';
+    const frontendUrl = `${proto}://${config.deployment.baseDomain}`;
+
+    const { code, error: oauthError } = request.query as { code?: string; error?: string };
+
+    if (oauthError || !code) {
+      return reply.redirect(`${frontendUrl}/login?error=github_denied`);
+    }
+
+    try {
+      const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({
+          client_id: config.github.clientId,
+          client_secret: config.github.clientSecret,
+          code,
+        }),
+      });
+
+      const tokenData = await tokenResponse.json() as { access_token?: string; error?: string };
+
+      if (tokenData.error || !tokenData.access_token) {
+        return reply.redirect(`${frontendUrl}/login?error=github_token_failed`);
+      }
+
+      const userResponse = await fetch('https://api.github.com/user', {
+        headers: {
+          'Authorization': `Bearer ${tokenData.access_token}`,
+          'Accept': 'application/vnd.github.v3+json',
+        },
+      });
+
+      const githubUser = await userResponse.json() as {
+        id: number; login: string; email: string | null;
+        name: string | null; avatar_url: string;
+      };
+
+      let email = githubUser.email;
+      if (!email) {
+        const emailsRes = await fetch('https://api.github.com/user/emails', {
+          headers: { 'Authorization': `Bearer ${tokenData.access_token}`, 'Accept': 'application/vnd.github.v3+json' },
+        });
+        const emails = await emailsRes.json() as { email: string; primary: boolean }[];
+        email = emails.find(e => e.primary)?.email || emails[0]?.email;
+      }
+
+      if (!email) {
+        return reply.redirect(`${frontendUrl}/login?error=github_no_email`);
+      }
+
+      let user = await prisma.user.findFirst({
+        where: { OR: [{ githubId: String(githubUser.id) }, { email }] },
+      });
+
+      if (user) {
+        user = await prisma.user.update({
+          where: { id: user.id },
+          data: { githubId: String(githubUser.id), avatarUrl: githubUser.avatar_url, role: isBootstrapAdminEmail(email) ? 'ADMIN' : user.role, lastLoginAt: new Date() },
+        });
+      } else {
+        user = await prisma.user.create({
+          data: { email, name: githubUser.name || githubUser.login, githubId: String(githubUser.id), avatarUrl: githubUser.avatar_url, role: isBootstrapAdminEmail(email) ? 'ADMIN' : 'USER', lastLoginAt: new Date() },
+        });
+        void emailService.sendWelcome(email, user.name || githubUser.login);
+      }
+
+      await storeGitHubToken(user.id, tokenData.access_token);
+      await createAuditLog({ userId: user.id, action: 'user.login', resourceType: 'user', resourceId: user.id, metadata: { provider: 'github', role: user.role }, request });
+
+      const token = app.jwt.sign({
+        sub: user.id, email: user.email, role: user.role,
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + (60 * 60 * 24 * 7),
+      });
+
+      logger.info({ userId: user.id }, 'User authenticated via GitHub (callback)');
+      return reply.redirect(`${frontendUrl}/auth/callback?token=${encodeURIComponent(token)}`);
+    } catch (error) {
+      logger.error({ error }, 'GitHub callback error');
+      return reply.redirect(`${frontendUrl}/login?error=github_failed`);
+    }
+  });
+
+  // ===========================================
   // GOOGLE OAUTH
   // ===========================================
 
@@ -799,6 +888,75 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         success: false,
         error: { code: 'AUTH_ERROR', message: 'Google authentication failed' },
       });
+    }
+  });
+
+  // ===========================================
+  // GOOGLE OAUTH CALLBACK (GET — browser redirect from Google)
+  // ===========================================
+
+  app.get('/google/callback', async (request: FastifyRequest, reply: FastifyReply) => {
+    const proto = config.deployment.useHttps ? 'https' : 'http';
+    const frontendUrl = `${proto}://${config.deployment.baseDomain}`;
+
+    const { code, error: oauthError } = request.query as { code?: string; error?: string };
+
+    if (oauthError || !code) {
+      return reply.redirect(`${frontendUrl}/login?error=google_denied`);
+    }
+
+    if (!config.google.clientId || !config.google.clientSecret) {
+      return reply.redirect(`${frontendUrl}/login?error=google_not_configured`);
+    }
+
+    try {
+      const client = new OAuth2Client(config.google.clientId, config.google.clientSecret, config.google.callbackUrl);
+      const { tokens } = await client.getToken(code);
+      client.setCredentials(tokens);
+
+      if (!tokens.id_token) {
+        return reply.redirect(`${frontendUrl}/login?error=google_no_id_token`);
+      }
+
+      const ticket = await client.verifyIdToken({ idToken: tokens.id_token, audience: config.google.clientId });
+      const payload = ticket.getPayload();
+      if (!payload?.email) {
+        return reply.redirect(`${frontendUrl}/login?error=google_no_email`);
+      }
+
+      const googleEmail = payload.email;
+      const googleName = payload.name || googleEmail.split('@')[0];
+      const googleAvatarUrl = payload.picture || '';
+
+      let user = await prisma.user.findFirst({ where: { email: googleEmail } });
+      const isNew = !user;
+
+      if (user) {
+        user = await prisma.user.update({
+          where: { id: user.id },
+          data: { avatarUrl: googleAvatarUrl || user.avatarUrl, role: isBootstrapAdminEmail(googleEmail) ? 'ADMIN' : user.role, lastLoginAt: new Date() },
+        });
+      } else {
+        user = await prisma.user.create({
+          data: { email: googleEmail, name: googleName, avatarUrl: googleAvatarUrl, role: isBootstrapAdminEmail(googleEmail) ? 'ADMIN' : 'USER', lastLoginAt: new Date() },
+        });
+      }
+
+      if (isNew) void emailService.sendWelcome(googleEmail, googleName);
+
+      await createAuditLog({ userId: user.id, action: 'user.login', resourceType: 'user', resourceId: user.id, metadata: { provider: 'google' }, request });
+
+      const token = app.jwt.sign({
+        sub: user.id, email: user.email, role: user.role,
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + (60 * 60 * 24 * 7),
+      });
+
+      logger.info({ userId: user.id }, 'User authenticated via Google (callback)');
+      return reply.redirect(`${frontendUrl}/auth/callback?token=${encodeURIComponent(token)}`);
+    } catch (error) {
+      logger.error({ error }, 'Google callback error');
+      return reply.redirect(`${frontendUrl}/login?error=google_failed`);
     }
   });
 }
