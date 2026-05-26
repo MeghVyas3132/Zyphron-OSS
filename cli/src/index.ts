@@ -9,6 +9,7 @@ process.env.FORCE_COLOR = '3';
 
 import { Command } from 'commander';
 import { loginCommand, logoutCommand, whoamiCommand, registerCommand } from './commands/auth/index.js';
+import { createCommand } from './commands/projects/create.js';
 import { registerDeployCommand } from './commands/deploy/index.js';
 import { registerStatusCommand } from './commands/status/index.js';
 import { registerLogsCommand } from './commands/logs/index.js';
@@ -276,6 +277,9 @@ program.addCommand(logoutCommand);
 program.addCommand(whoamiCommand);
 program.addCommand(registerCommand);
 
+// Projects
+program.addCommand(createCommand);
+
 // Deployments
 registerDeployCommand(program);
 registerStatusCommand(program);
@@ -312,17 +316,19 @@ program.exitOverride((err) => {
 // PARSE & EXECUTE
 // ===========================================
 
-try {
-  await program.parseAsync(process.argv);
-} catch (error) {
-  // Silent exit for help and version
-  if (error instanceof Error) {
-    if ((error as any).code === 'commander.helpDisplayed') {
-      process.exit(0);
+(async () => {
+  try {
+    await program.parseAsync(process.argv);
+  } catch (error) {
+    // Silent exit for help and version
+    if (error instanceof Error) {
+      if ((error as any).code === 'commander.helpDisplayed') {
+        process.exit(0);
+      }
+      if ((error as any).code === 'commander.version') {
+        process.exit(0);
+      }
     }
-    if ((error as any).code === 'commander.version') {
-      process.exit(0);
-    }
+    process.exit(1);
   }
-  process.exit(1);
-}
+})();

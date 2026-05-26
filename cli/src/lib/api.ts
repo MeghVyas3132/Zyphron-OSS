@@ -150,9 +150,10 @@ class ApiClient {
   
   async createProject(data: {
     name: string;
-    repositoryUrl: string;
+    repositoryUrl?: string;
     branch?: string;
     rootDirectory?: string;
+    slug?: string;
   }): Promise<ApiResponse<Project>> {
     const response = await this.client.post('/api/v1/projects', data);
     return response.data;

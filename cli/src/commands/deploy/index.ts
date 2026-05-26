@@ -7,10 +7,32 @@ import { Command } from 'commander';
 import inquirer from 'inquirer';
 import ora from 'ora';
 import chalk from 'chalk';
+import { readFileSync, existsSync } from 'fs';
+import { resolve } from 'path';
 import { createApiClient } from '../../lib/api.js';
 import { getToken, getApiUrl } from '../../lib/config.js';
 import { style, purpleBlueGradient, sleep } from '../../lib/ui.js';
 import WebSocket from 'ws';
+
+// Parse a .env file string into a key→value map (handles comments, empty lines, quoted values)
+function parseDotEnv(content: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const raw of content.split('\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const eq = line.indexOf('=');
+    if (eq === -1) continue;
+    const key = line.slice(0, eq).trim();
+    let val = line.slice(eq + 1).trim();
+    // Strip surrounding quotes
+    if ((val.startsWith('"') && val.endsWith('"')) ||
+        (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1);
+    }
+    if (key) result[key] = val;
+  }
+  return result;
+}
 
 interface EnvVar {
   name: string;
@@ -102,8 +124,9 @@ export function registerDeployCommand(program: Command): void {
     .argument('[url]', 'Public GitHub repository URL')
     .option('-n, --name <name>', 'Project name (auto-generated if omitted)')
     .option('-b, --branch <branch>', 'Branch to deploy', 'main')
+    .option('-e, --env-file <path>', 'Path to .env file (auto-detects .env in current dir)')
     .option('--no-stream', 'Skip live log streaming')
-    .action(async (url: string | undefined, opts: { name?: string; branch: string; stream: boolean }) => {
+    .action(async (url: string | undefined, opts: { name?: string; branch: string; envFile?: string; stream: boolean }) => {
       console.log('');
       console.log(purpleBlueGradient('  ⚡ Zyphron Deploy'));
       console.log('');
@@ -138,6 +161,28 @@ export function registerDeployCommand(program: Command): void {
       console.log('');
 
       const api = createApiClient(getApiUrl(), token);
+
+      // ── Pre-load .env file if available ──────────────
+      let preloadedEnv: Record<string, string> = {};
+      const envFilePath = opts.envFile
+        ? resolve(opts.envFile)
+        : existsSync(resolve('.env'))
+        ? resolve('.env')
+        : null;
+
+      if (envFilePath && existsSync(envFilePath)) {
+        try {
+          preloadedEnv = parseDotEnv(readFileSync(envFilePath, 'utf8'));
+          const count = Object.keys(preloadedEnv).length;
+          console.log(chalk.hex('#A78BFA')(`  Found ${chalk.white(envFilePath.split('/').pop())} — ${count} variable${count !== 1 ? 's' : ''} pre-loaded`));
+          console.log('');
+        } catch {
+          console.log(chalk.yellow(`  Could not read ${envFilePath} — skipping`));
+        }
+      } else if (opts.envFile) {
+        console.log(chalk.yellow(`  .env file not found: ${opts.envFile}`));
+        console.log('');
+      }
 
       // ── Step 1: Scan ENV vars ──────────────────────
       const scanSpinner = ora({
