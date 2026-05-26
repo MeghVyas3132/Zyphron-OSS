@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
@@ -11,7 +11,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { useEffect } from 'react';
+const LANDING_URL = process.env.NEXT_PUBLIC_LANDING_URL ?? 'https://zyphron.space';
 
 // Google icon SVG
 function GoogleIcon({ className }: { className?: string }) {
@@ -40,17 +40,9 @@ export default function LoginPage() {
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
 
   useEffect(() => {
-    const error = params.get('error');
-    if (error) {
-      const messages: Record<string, string> = {
-        github_denied: 'GitHub login was cancelled.',
-        github_no_email: 'No email found on your GitHub account.',
-        github_failed: 'GitHub login failed. Please try again.',
-        google_denied: 'Google login was cancelled.',
-        google_failed: 'Google login failed. Please try again.',
-      };
-      toast.error(messages[error] || 'Authentication failed.');
-    }
+    const query = params.toString();
+    const suffix = query ? `?${query}` : '';
+    window.location.replace(`${LANDING_URL}/${suffix}#access`);
   }, [params]);
 
   const {

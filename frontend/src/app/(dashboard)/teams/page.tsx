@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { 
   Users, Plus, Settings, ExternalLink, FolderGit2, 
   Crown, Shield, Code, Eye, MoreVertical, Trash2,
-  UserPlus, LogOut
+  UserPlus
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -53,22 +53,22 @@ export default function TeamsPage() {
 
   const getRoleIcon = (role: string) => {
     switch (role) {
-      case 'OWNER': return <Crown className="h-4 w-4 text-yellow-500" />;
-      case 'ADMIN': return <Shield className="h-4 w-4 text-blue-500" />;
-      case 'DEVELOPER': return <Code className="h-4 w-4 text-green-500" />;
-      case 'VIEWER': return <Eye className="h-4 w-4 text-gray-500" />;
+      case 'OWNER': return <Crown className="h-4 w-4 text-white/55" />;
+      case 'ADMIN': return <Shield className="h-4 w-4 text-white/45" />;
+      case 'DEVELOPER': return <Code className="h-4 w-4 text-white/45" />;
+      case 'VIEWER': return <Eye className="h-4 w-4 text-white/35" />;
       default: return null;
     }
   };
 
   const getRoleBadge = (role: string) => {
     const colors: Record<string, string> = {
-      OWNER: 'bg-yellow-500/10 text-yellow-600',
-      ADMIN: 'bg-blue-500/10 text-blue-600',
-      DEVELOPER: 'bg-green-500/10 text-green-600',
-      VIEWER: 'bg-gray-500/10 text-gray-600',
+      OWNER: 'border-white/15 text-white/75',
+      ADMIN: 'border-white/12 text-white/60',
+      DEVELOPER: 'border-white/12 text-white/60',
+      VIEWER: 'border-white/10 text-white/45',
     };
-    return colors[role] || 'bg-gray-500/10 text-gray-600';
+    return colors[role] || 'border-white/10 text-white/45';
   };
 
   return (
@@ -76,8 +76,9 @@ export default function TeamsPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Teams</h1>
-          <p className="text-muted-foreground mt-1">
+          <div className="font-mono-ui text-[9px] uppercase tracking-[0.35em] text-white/25 mb-2">Collaboration</div>
+          <h1 className="text-3xl font-semibold tracking-tight">Teams</h1>
+          <p className="text-white/45 mt-1">
             Collaborate with your team on projects
           </p>
         </div>
@@ -89,7 +90,7 @@ export default function TeamsPage() {
 
       {/* Create Team Dialog */}
       {isCreating && (
-        <div className="rounded-lg border bg-card p-6 space-y-4">
+        <div className="zy-panel p-6 space-y-4">
           <h3 className="font-semibold">Create New Team</h3>
           
           <div className="space-y-2">
@@ -142,10 +143,10 @@ export default function TeamsPage() {
 
       {/* Empty State */}
       {!isLoading && !error && teams.length === 0 && (
-        <div className="rounded-lg border bg-card p-12 text-center">
-          <Users className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
+        <div className="zy-panel p-12 text-center">
+          <Users className="h-12 w-12 mx-auto text-white/20 mb-4" />
           <h3 className="text-lg font-semibold mb-2">No teams yet</h3>
-          <p className="text-muted-foreground mb-4">
+          <p className="text-white/45 mb-4">
             Create a team to collaborate with others on projects.
           </p>
           <Button onClick={() => setIsCreating(true)} className="gap-2">
@@ -161,13 +162,13 @@ export default function TeamsPage() {
           {teams.map((team: Team) => (
             <div
               key={team.id}
-              className="rounded-lg border bg-card overflow-hidden hover:border-primary/50 transition-colors"
+              className="zy-panel overflow-hidden hover:border-white/20 transition-colors"
             >
               <div className="p-6">
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center">
-                      <span className="text-xl font-bold text-primary">
+                    <div className="w-12 h-12 rounded-lg border border-white/10 bg-white/[0.02] flex items-center justify-center">
+                      <span className="text-xl font-semibold text-white/70">
                         {team.name.charAt(0)}
                       </span>
                     </div>
@@ -175,7 +176,7 @@ export default function TeamsPage() {
                       <h3 className="font-semibold">{team.name}</h3>
                       <div className="flex items-center gap-2 mt-1">
                         {getRoleIcon(team.role)}
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${getRoleBadge(team.role)}`}>
+                        <span className={`text-xs px-2 py-0.5 rounded-full border ${getRoleBadge(team.role)}`}>
                           {team.role}
                         </span>
                       </div>
@@ -241,8 +242,8 @@ export default function TeamsPage() {
                 </div>
               </div>
 
-              <div className="px-6 py-3 border-t bg-muted/50 flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">
+              <div className="px-6 py-3 border-t border-white/[0.06] bg-white/[0.01] flex items-center justify-between">
+                <span className="text-xs text-white/35">
                   Owner: {team.owner.name || team.owner.email}
                 </span>
                 <Link href={`/teams/${team.id}`}>

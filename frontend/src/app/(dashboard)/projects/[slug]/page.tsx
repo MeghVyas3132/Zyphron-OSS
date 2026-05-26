@@ -1,13 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { 
-  ArrowLeft, 
-  Settings, 
-  GitBranch, 
-  Globe, 
+import {
+  ArrowLeft,
+  Settings,
+  GitBranch,
+  Globe,
   Clock,
   ExternalLink,
   RefreshCw,
@@ -36,50 +36,44 @@ const statusConfig = {
   FAILED: { icon: XCircle, color: 'text-red-500', bg: 'bg-red-500/10', label: 'Failed' },
   CANCELLED: { icon: XCircle, color: 'text-gray-500', bg: 'bg-gray-500/10', label: 'Cancelled' },
   ROLLING_BACK: { icon: Loader2, color: 'text-orange-500', bg: 'bg-orange-500/10', label: 'Rolling Back', animate: true },
-} satisfies Record<
-  Exclude<Deployment['status'], 'CANCELLED'> | 'CANCELLED' | 'QUEUED' | 'LIVE' | 'ROLLING_BACK',
-  { icon: React.ElementType; color: string; bg: string; label: string; animate?: boolean }
->;
-
-const frameworkIcons: Record<string, string> = {
-  nextjs: '▲',
-  react: 'React',
-  vue: 'Vue',
-  nuxt: 'Vue',
-  svelte: 'Svelte',
-  sveltekit: 'Svelte',
-  angular: 'Angular',
-  express: 'Node',
-  fastify: 'Node',
-  nestjs: 'Nest',
-  flask: 'Python',
-  django: 'Python',
-  fastapi: 'Python',
-  go: 'Go',
-  rust: 'Rust',
-  static: 'Static',
-  docker: 'Docker',
-  unknown: 'Package',
-};
+} as Record<string, { icon: React.ElementType; color: string; bg: string; label: string; animate?: boolean; spin?: boolean }>;
 
 export default function ProjectDetailPage() {
   const params = useParams();
   const router = useRouter();
   const slug = params.slug as string;
-  
+
   const [activeTab, setActiveTab] = useState<'deployments' | 'settings' | 'logs'>('deployments');
-  
+  const logsEndRef = useRef<HTMLDivElement>(null);
+
   // Use React Query hooks
   const { data: projectData, isLoading: projectLoading, isError: projectError, error: projectFetchError, refetch: refetchProject } = useProject(slug);
   const { data: deploymentsData, isLoading: deploymentsLoading, refetch: refetchDeployments } = useDeployments(slug);
   const deployMutation = useDeploy(slug);
   const deleteMutation = useDeleteProject();
 
-  const project = projectData?.data;
-  const deployments = deploymentsData?.data || [];
+  const project = projectData?.data as Project | undefined;
+  const deployments = (deploymentsData as unknown as { data?: Deployment[] } | undefined)?.data ?? [];
   const isLoading = projectLoading || deploymentsLoading;
 
-  const frameworkIcon = frameworkIcons[project?.framework || 'unknown'] || 'Package';
+  // Auto-refresh when there's an active deployment
+  const hasActiveDeployment = deployments.some(d =>
+    d.status === 'QUEUED' || d.status === 'BUILDING' || d.status === 'DEPLOYING'
+  );
+  useEffect(() => {
+    if (!hasActiveDeployment) return;
+    const interval = setInterval(() => {
+      refetchDeployments();
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [hasActiveDeployment, refetchDeployments]);
+
+  // Scroll logs to bottom on new content
+  useEffect(() => {
+    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [deployments]);
+
+  const frameworkLabel = (project?.framework ?? 'unknown').toUpperCase();
 
   const handleDeploy = async () => {
     try {
@@ -93,7 +87,7 @@ export default function ProjectDetailPage() {
   const handleDelete = async () => {
     if (!project) return;
     if (!confirm(`Are you sure you want to delete "${project.name}"? This cannot be undone.`)) return;
-    
+
     try {
       await deleteMutation.mutateAsync(project.slug);
       router.push('/projects');
@@ -130,6 +124,13 @@ export default function ProjectDetailPage() {
     );
   }
 
+  // Latest deployment for logs tab
+  const latestDeployment = deployments[0] ?? null;
+  // Use buildLogs if available, otherwise fall back to errorMessage so failures always show something
+  const latestLogs = latestDeployment?.buildLogs ?? latestDeployment?.errorMessage ?? null;
+  const latestIsActive = latestDeployment &&
+    (latestDeployment.status === 'QUEUED' || latestDeployment.status === 'BUILDING' || latestDeployment.status === 'DEPLOYING');
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -140,7 +141,6 @@ export default function ProjectDetailPage() {
           </Button>
         </Link>
         <div className="flex items-center gap-3 flex-1">
-          <span className="text-3xl">{frameworkIcon}</span>
           <div>
             <h1 className="text-2xl font-bold">{project.name}</h1>
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
@@ -148,6 +148,7 @@ export default function ProjectDetailPage() {
                 <GitBranch className="h-4 w-4" />
                 <span>{project.defaultBranch || project.branch || 'main'}</span>
               </div>
+              <span className="text-xs uppercase tracking-[0.2em] text-muted-foreground/70">{frameworkLabel}</span>
               {project.productionUrl && (
                 <a
                   href={project.productionUrl}
@@ -198,6 +199,9 @@ export default function ProjectDetailPage() {
             }`}
           >
             Deployments
+            {deployments.length > 0 && (
+              <span className="ml-2 text-xs bg-muted px-1.5 py-0.5 rounded-full">{deployments.length}</span>
+            )}
           </button>
           <button
             onClick={() => setActiveTab('logs')}
@@ -208,6 +212,12 @@ export default function ProjectDetailPage() {
             }`}
           >
             Logs
+            {latestIsActive && (
+              <span className="ml-2 inline-flex items-center gap-1 text-xs text-blue-500">
+                <span className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse inline-block" />
+                Live
+              </span>
+            )}
           </button>
           <button
             onClick={() => setActiveTab('settings')}
@@ -235,7 +245,7 @@ export default function ProjectDetailPage() {
           ) : (
             <div className="rounded-lg border divide-y">
               {deployments.map((deployment) => {
-                const config = statusConfig[deployment.status];
+                const config = statusConfig[deployment.status] ?? statusConfig['FAILED'];
                 const StatusIcon = config.icon;
 
                 return (
@@ -251,16 +261,20 @@ export default function ProjectDetailPage() {
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
-                            <p className="font-medium">{deployment.commitMessage}</p>
+                            <p className="font-medium">{deployment.commitMessage || 'Manual deployment'}</p>
                             <span className={`text-xs px-2 py-0.5 rounded ${config.bg} ${config.color}`}>
                               {config.label}
                             </span>
                           </div>
                           <div className="flex items-center gap-2 text-sm text-muted-foreground">
                             <GitBranch className="h-3 w-3" />
-                            <span>{deployment.branch}</span>
-                            <span>·</span>
-                            <span>{deployment.commitSha.slice(0, 7)}</span>
+                            <span>{deployment.branch || 'main'}</span>
+                            {deployment.commitSha && (
+                              <>
+                                <span>·</span>
+                                <span className="font-mono">{deployment.commitSha.slice(0, 7)}</span>
+                              </>
+                            )}
                             <span>·</span>
                             <Clock className="h-3 w-3" />
                             <span>{formatRelativeTime(deployment.createdAt)}</span>
@@ -285,13 +299,17 @@ export default function ProjectDetailPage() {
                         </Button>
                       </div>
                     </div>
-                    {deployment.logs && deployment.status === 'FAILED' && (
+                    {deployment.status === 'FAILED' && (deployment.buildLogs || deployment.errorMessage) && (
                       <div className="mt-3 p-3 bg-red-500/10 rounded-lg border border-red-500/20">
                         <div className="flex items-center gap-2 text-red-500 text-sm font-medium mb-1">
                           <Terminal className="h-4 w-4" />
-                          Build Error
+                          {deployment.buildLogs ? 'Build Error' : 'Deployment Error'}
                         </div>
-                        <p className="text-sm text-muted-foreground font-mono">{deployment.logs}</p>
+                        <pre className="text-xs text-muted-foreground font-mono whitespace-pre-wrap overflow-auto max-h-40">
+                          {deployment.buildLogs
+                            ? deployment.buildLogs.split('\n').slice(-20).join('\n')
+                            : deployment.errorMessage}
+                        </pre>
                       </div>
                     )}
                   </div>
@@ -357,9 +375,9 @@ export default function ProjectDetailPage() {
             <p className="text-sm text-muted-foreground">
               Once you delete a project, there is no going back. This action cannot be undone.
             </p>
-            <Button 
-              variant="destructive" 
-              className="gap-2" 
+            <Button
+              variant="destructive"
+              className="gap-2"
               onClick={handleDelete}
               disabled={deleteMutation.isPending}
             >
@@ -374,22 +392,75 @@ export default function ProjectDetailPage() {
       {activeTab === 'logs' && (
         <div className="rounded-lg border bg-card p-6">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold">Live Logs</h3>
-            <Button variant="outline" size="sm">
-              <Activity className="h-4 w-4 mr-2" />
-              Live
-            </Button>
+            <div>
+              <h3 className="font-semibold">Build Logs</h3>
+              {latestDeployment && (
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Deployment from {formatRelativeTime(latestDeployment.createdAt)}
+                  {latestDeployment.commitSha && (
+                    <span className="ml-1 font-mono">· {latestDeployment.commitSha.slice(0, 7)}</span>
+                  )}
+                </p>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {latestIsActive && (
+                <span className="flex items-center gap-1.5 text-xs text-blue-500 font-medium">
+                  <span className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse inline-block" />
+                  Live
+                </span>
+              )}
+              <Button variant="outline" size="sm" onClick={() => refetchDeployments()}>
+                <RefreshCw className="h-3.5 w-3.5 mr-1" />
+                Refresh
+              </Button>
+            </div>
           </div>
-          <div className="bg-black rounded-lg p-4 font-mono text-sm text-green-400 h-96 overflow-auto">
-            <p>[2024-01-15 10:32:01] Cloning repository...</p>
-            <p>[2024-01-15 10:32:03] Installing dependencies...</p>
-            <p>[2024-01-15 10:32:15] Running build command...</p>
-            <p>[2024-01-15 10:32:45] Build completed successfully</p>
-            <p>[2024-01-15 10:32:46] Uploading artifacts...</p>
-            <p>[2024-01-15 10:32:50] Deploying to edge network...</p>
-            <p>[2024-01-15 10:32:55] [OK] Deployment ready</p>
-            <p className="text-muted-foreground mt-4">No new logs...</p>
+          <div className="bg-black rounded-lg p-4 font-mono text-sm h-96 overflow-auto">
+            {!latestDeployment ? (
+              <p className="text-muted-foreground">No deployments yet. Deploy your project to see build logs.</p>
+            ) : latestIsActive && !latestLogs ? (
+              <div className="flex items-center gap-2 text-blue-400">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Connecting to build stream...</span>
+              </div>
+            ) : latestLogs ? (
+              <>
+                {latestLogs.split('\n').map((line, i) => {
+                  const isError = line.toLowerCase().includes('error') || line.toLowerCase().includes('failed');
+                  const isWarning = line.toLowerCase().includes('warn');
+                  const isSuccess = line.toLowerCase().includes('success') || line.includes('[OK]') || line.includes('✓') || line.includes('✔');
+                  return (
+                    <p
+                      key={i}
+                      className={
+                        isError ? 'text-red-400' :
+                        isWarning ? 'text-yellow-400' :
+                        isSuccess ? 'text-green-400' :
+                        'text-green-300'
+                      }
+                    >
+                      {line || ' '}
+                    </p>
+                  );
+                })}
+                <div ref={logsEndRef} />
+              </>
+            ) : (
+              <p className="text-muted-foreground">
+                {latestDeployment.status === 'FAILED'
+                  ? 'Build failed — no logs captured.'
+                  : latestDeployment.status === 'LIVE'
+                  ? 'Deployment is live. No build logs available.'
+                  : 'No logs available for this deployment.'}
+              </p>
+            )}
           </div>
+          {deployments.length > 1 && (
+            <p className="mt-2 text-xs text-muted-foreground text-right">
+              Showing logs for the most recent deployment. {deployments.length} total deployments.
+            </p>
+          )}
         </div>
       )}
     </div>

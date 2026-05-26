@@ -20,27 +20,6 @@ const cardVariants = {
   show: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.5, ease: [0.19, 1, 0.22, 1] as const } },
 };
 
-const frameworkIcons: Record<string, string> = {
-  nextjs: '▲',
-  react: 'React',
-  vue: 'Vue',
-  nuxt: 'Vue',
-  svelte: 'Svelte',
-  sveltekit: 'Svelte',
-  angular: 'Angular',
-  express: 'Node',
-  fastify: 'Node',
-  nestjs: 'Nest',
-  flask: 'Python',
-  django: 'Python',
-  fastapi: 'Python',
-  go: 'Go',
-  rust: 'Rust',
-  static: 'Static',
-  docker: 'Docker',
-  unknown: 'Package',
-};
-
 export default function ProjectsPage() {
   const [search, setSearch] = useState('');
   const { data, isLoading, isError, error, refetch } = useProjects();
@@ -159,23 +138,19 @@ export default function ProjectsPage() {
 
 function ProjectCard({ project }: { project: Project }) {
   const framework = project.framework || 'unknown';
-  const frameworkIcon = frameworkIcons[framework] || 'Package';
-  const frameworkAbbr = framework.toUpperCase().slice(0, 3);
+  const frameworkLabel = framework === 'unknown' ? 'service' : framework;
 
   return (
     <Link href={`/projects/${project.slug}`}>
       <div className="premium-panel premium-card-hover p-6 cursor-pointer group">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
-            <div className="h-11 w-11 rounded-xl bg-foreground/10 flex items-center justify-center border border-foreground/15">
-              <span className="text-[11px] font-semibold tracking-wide">{frameworkAbbr}</span>
-            </div>
             <div>
               <h3 className="font-semibold group-hover:opacity-75 transition-opacity">
                 {project.name}
               </h3>
               <p className="text-xs text-muted-foreground uppercase tracking-[0.16em] mt-1">
-                {frameworkIcon} {project.slug}
+                {frameworkLabel} · {project.slug}
               </p>
             </div>
           </div>

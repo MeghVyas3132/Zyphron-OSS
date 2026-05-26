@@ -309,12 +309,13 @@ export interface UpdateProjectInput {
 export interface Deployment {
   id: string;
   projectId: string;
-  status: 'PENDING' | 'BUILDING' | 'DEPLOYING' | 'READY' | 'FAILED' | 'CANCELLED';
-  branch: string;
-  commitSha: string;
-  commitMessage: string;
+  status: 'QUEUED' | 'BUILDING' | 'DEPLOYING' | 'LIVE' | 'FAILED' | 'CANCELLED' | 'ROLLING_BACK';
+  branch: string | null;
+  commitSha: string | null;
+  commitMessage: string | null;
   url: string | null;
-  logs: string | null;
+  buildLogs: string | null;
+  errorMessage: string | null;
   createdAt: string;
   completedAt: string | null;
 }

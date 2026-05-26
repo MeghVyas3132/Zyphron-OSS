@@ -1,51 +1,41 @@
 import type { Metadata } from 'next';
+import { JetBrains_Mono, Syne } from 'next/font/google';
 import { ThemeProvider } from '@/components/providers/theme-provider';
 import { QueryProvider } from '@/components/providers/query-provider';
 import { Toaster } from '@/components/ui/sonner';
 import '@/styles/globals.css';
 
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ['latin'],
+  variable: '--font-mono',
+  display: 'swap',
+  weight: ['300', '400', '500'],
+});
+
+const syne = Syne({
+  subsets: ['latin'],
+  variable: '--font-display',
+  display: 'swap',
+  weight: ['400', '500', '600', '700'],
+});
+
 export const metadata: Metadata = {
   title: {
-    default: 'Zyphron - Universal Deployment Platform',
-    template: '%s | Zyphron',
+    default: 'Zyphron — Deployment Intelligence',
+    template: '%s / Zyphron',
   },
-  description: 'Next-Generation Universal Deployment Platform. Deploy any application, any language, anywhere.',
-  keywords: ['deployment', 'platform', 'hosting', 'cloud', 'docker', 'kubernetes'],
-  authors: [{ name: 'Zyphron' }],
-  creator: 'Zyphron',
-  openGraph: {
-    type: 'website',
-    locale: 'en_US',
-    url: 'https://zyphron.dev',
-    title: 'Zyphron - Universal Deployment Platform',
-    description: 'Next-Generation Universal Deployment Platform',
-    siteName: 'Zyphron',
-  },
-  twitter: {
-    card: 'summary_large_image',
-    title: 'Zyphron - Universal Deployment Platform',
-    description: 'Next-Generation Universal Deployment Platform',
-  },
-  icons: {
-    icon: '/favicon.ico',
-    shortcut: '/favicon-16x16.png',
-    apple: '/apple-touch-icon.png',
-  },
-  manifest: '/site.webmanifest',
+  description: 'Autonomous deployment network that thinks across clouds, regions and runtimes.',
+  icons: { icon: '/favicon.ico' },
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className="font-sans antialiased">
+    <html lang="en" className="dark" suppressHydrationWarning>
+      <body className={`${jetbrainsMono.variable} ${syne.variable} font-sans antialiased`}>
         <ThemeProvider
           attribute="class"
-          defaultTheme="light"
-          enableSystem
+          defaultTheme="dark"
+          forcedTheme="dark"
           disableTransitionOnChange
         >
           <QueryProvider>

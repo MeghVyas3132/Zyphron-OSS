@@ -23,6 +23,15 @@ export function useDeployments(
     queryKey: deploymentKeys.list(projectSlug, params),
     queryFn: () => projectsApi.getDeployments(projectSlug, params),
     enabled: !!projectSlug,
+    // Poll when there's an active deployment
+    refetchInterval: (query) => {
+      const raw = query.state.data as { data?: { status: string }[] } | undefined;
+      const deployments = raw?.data ?? [];
+      const hasActive = deployments.some(
+        (d) => d.status === 'QUEUED' || d.status === 'BUILDING' || d.status === 'DEPLOYING'
+      );
+      return hasActive ? 4000 : false;
+    },
   });
 }
 
@@ -72,8 +81,8 @@ export function useRollback(projectSlug: string) {
     mutationFn: async (deploymentId: string) => {
       // Rollback creates a new deployment from a previous one
       const deployment = await projectsApi.getDeployment(projectSlug, deploymentId);
-      return projectsApi.deploy(projectSlug, { 
-        branch: deployment.data.branch,
+      return projectsApi.deploy(projectSlug, {
+        branch: deployment.data.branch ?? undefined,
       });
     },
     onSuccess: () => {

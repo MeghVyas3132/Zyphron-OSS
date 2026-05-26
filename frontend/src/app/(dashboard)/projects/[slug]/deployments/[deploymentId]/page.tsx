@@ -115,8 +115,8 @@ export default function DeploymentDetailPage() {
 
   // Parse existing logs if present
   useEffect(() => {
-    if (deployment?.logs && logs.length === 0) {
-      const existingLogs = deployment.logs.split('\n').filter(Boolean).map((line, i) => ({
+    if (deployment?.buildLogs && logs.length === 0) {
+      const existingLogs = deployment.buildLogs.split('\n').filter(Boolean).map((line, i) => ({
         id: `existing-${i}`,
         timestamp: new Date().toLocaleTimeString(),
         message: line,
@@ -124,7 +124,7 @@ export default function DeploymentDetailPage() {
       }));
       setLogs(existingLogs);
     }
-  }, [deployment?.logs, logs.length]);
+  }, [deployment?.buildLogs, logs.length]);
 
   const itemAnim = {
     hidden: { opacity: 0, y: 16 },
@@ -229,7 +229,7 @@ export default function DeploymentDetailPage() {
               {cancelMutation.isPending ? 'Cancelling...' : 'Cancel'}
             </Button>
           )}
-          {deployment.status === 'READY' && (
+          {deployment.status === 'LIVE' && (
             <Button 
               variant="outline" 
               onClick={handleRollback}
@@ -320,7 +320,7 @@ export default function DeploymentDetailPage() {
       </motion.div>
 
       {/* Error Details */}
-      {deployment.status === 'FAILED' && deployment.logs && (
+      {deployment.status === 'FAILED' && deployment.buildLogs && (
         <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-6">
           <div className="flex items-center gap-2 text-red-500 font-semibold mb-4">
             <XCircle className="h-5 w-5" />

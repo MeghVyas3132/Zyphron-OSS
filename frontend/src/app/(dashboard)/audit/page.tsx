@@ -208,7 +208,7 @@ export default function AuditPage() {
                   <tr key={i} className="border-b border-border/20">
                     {Array.from({ length: 5 }).map((_, j) => (
                       <td key={j} className="px-4 py-3">
-                        <div className="h-4 bg-foreground/5 rounded animate-pulse" style={{ width: `${60 + Math.random() * 40}%` }} />
+                        <div className="h-4 bg-foreground/5 rounded animate-pulse" style={{ width: `${[70, 55, 65, 40, 50][j]}%` }} />
                       </td>
                     ))}
                   </tr>

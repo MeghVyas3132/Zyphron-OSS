@@ -5,62 +5,76 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   Activity,
-  Bell,
-  BarChart3,
-  ChevronLeft,
-  ChevronRight,
   Database,
-  FlaskConical,
   FolderKanban,
-  Gauge,
   GitBranch,
+  Layers,
   LayoutDashboard,
   LogOut,
-  Moon,
-  Plus,
   Rocket,
-  Search,
   Settings,
   Shield,
-  Sun,
   Zap,
+  FlaskConical,
+  Gauge,
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  Bell,
+  Search,
+  Crown,
 } from 'lucide-react';
-import { useTheme } from 'next-themes';
-import { Button } from '@/components/ui/button';
 import { PageTransition } from '@/components/animated/page-transition';
 import { cn } from '@/lib/utils';
 
-const navigation = [
-  // Core
-  { name: 'Dashboard',    href: '/dashboard',   icon: LayoutDashboard },
-  { name: 'Projects',     href: '/projects',    icon: FolderKanban },
-  // Monitoring
-  { name: 'Observability',href: '/observability',icon: Activity },
-  { name: 'Audit Logs',   href: '/audit',       icon: Shield },
-  // DevOps
-  { name: 'Load Testing', href: '/stress',      icon: Gauge },
-  { name: 'Chaos Testing',href: '/chaos',       icon: FlaskConical },
-  { name: 'AI Insights',  href: '/ai',          icon: Zap },
-  // Data
-  { name: 'Databases',    href: '/databases',   icon: Database },
-  { name: 'DB Branches',  href: '/db-branches', icon: GitBranch },
-  // Platform
-  { name: 'Edge Functions',href: '/edge',       icon: Rocket },
-  { name: 'Strategies',   href: '/strategies',  icon: Rocket },
-  { name: 'Self-Deploy',  href: '/self-deploy', icon: Zap },
-  { name: 'Settings',     href: '/settings',    icon: Settings },
-];
-const delayClasses = ['animate-delay-1', 'animate-delay-2', 'animate-delay-3', 'animate-delay-4'];
+const LANDING_URL = process.env.NEXT_PUBLIC_LANDING_URL ?? 'https://zyphron.space';
 
-export default function DashboardLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+const NAV_SECTIONS = [
+  {
+    label: 'Core',
+    items: [
+      { name: 'Dashboard',    href: '/dashboard',        icon: LayoutDashboard },
+      { name: 'Projects',     href: '/projects',         icon: FolderKanban },
+      { name: 'Stacks',       href: '/projects/stacks',  icon: Layers },
+    ],
+  },
+  {
+    label: 'Observe',
+    items: [
+      { name: 'Observability', href: '/observability',   icon: Activity },
+      { name: 'Audit Logs',    href: '/audit',           icon: Shield },
+    ],
+  },
+  {
+    label: 'DevOps',
+    items: [
+      { name: 'Load Testing',  href: '/stress',          icon: Gauge },
+      { name: 'Chaos Testing', href: '/chaos',           icon: FlaskConical },
+      { name: 'AI Insights',   href: '/ai',              icon: Zap },
+    ],
+  },
+  {
+    label: 'Data',
+    items: [
+      { name: 'Databases',     href: '/databases',       icon: Database },
+      { name: 'DB Branches',   href: '/db-branches',     icon: GitBranch },
+    ],
+  },
+  {
+    label: 'Platform',
+    items: [
+      { name: 'Edge',          href: '/edge',            icon: Rocket },
+      { name: 'Strategies',    href: '/strategies',      icon: Rocket },
+      { name: 'Self-Deploy',   href: '/self-deploy',     icon: Zap },
+      { name: 'Settings',      href: '/settings',        icon: Settings },
+      { name: 'Admin',         href: '/admin',           icon: Crown },
+    ],
+  },
+];
+
+export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { theme, setTheme } = useTheme();
-
   const [collapsed, setCollapsed] = useState(false);
   const [ready, setReady] = useState(false);
 
@@ -68,163 +82,171 @@ export default function DashboardLayout({
     const guard = async () => {
       const token = localStorage.getItem('auth-token');
       if (!token) {
-        router.replace('/login');
+        window.location.replace(`${LANDING_URL}/#access`);
         return;
       }
-
       try {
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/me`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/me`, {
+          headers: { Authorization: `Bearer ${token}` },
         });
-
-        if (!response.ok) {
+        if (!res.ok) {
           localStorage.removeItem('auth-token');
-          router.replace('/login');
+          window.location.replace(`${LANDING_URL}/#access`);
           return;
         }
-
         setReady(true);
       } catch {
         localStorage.removeItem('auth-token');
-        router.replace('/login');
+        window.location.replace(`${LANDING_URL}/#access`);
       }
     };
-
     void guard();
   }, [router]);
 
   if (!ready) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="h-9 w-9 rounded-full border-2 border-foreground/20 border-t-foreground animate-spin" />
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <span className="h-6 w-6 rounded-full border border-white/20 border-t-white/60 animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen premium-shell flex">
-      <div className="ambient-layer">
-        <div className="ambient-orb ambient-orb-a" />
-        <div className="ambient-orb ambient-orb-b" />
-        <div className="ambient-orb ambient-orb-c" />
-      </div>
+    <div className="min-h-screen flex bg-background">
+      {/* ── Sidebar ──────────────────────────────────────────── */}
       <aside
         className={cn(
-          'fixed left-0 top-0 z-40 h-screen border-r bg-card/75 backdrop-blur-xl transition-all duration-500',
-          collapsed ? 'w-20' : 'w-72'
+          'fixed left-0 top-0 z-40 h-screen border-r border-white/[0.06] bg-[#040404] transition-all duration-500 flex flex-col',
+          collapsed ? 'w-[60px]' : 'w-[240px]'
         )}
       >
-        <div className="h-full flex flex-col">
-          <div className="h-20 px-4 flex items-center justify-between border-b border-border/60">
-            <Link href="/dashboard" className="flex items-center gap-3">
-              <div className="size-10 rounded-xl bg-primary text-primary-foreground flex items-center justify-center shadow-lg shadow-foreground/15">
-                <Zap className="h-5 w-5" />
+        {/* Logo */}
+        <div className={cn(
+          'h-16 flex items-center border-b border-white/[0.06] flex-shrink-0',
+          collapsed ? 'justify-center px-0' : 'justify-between px-5'
+        )}>
+          <Link href="/dashboard" className="flex items-center gap-3 min-w-0">
+            <div className="h-7 w-7 rounded border border-white/15 flex items-center justify-center flex-shrink-0">
+              <span className="font-mono-ui text-[11px] font-medium text-white/80">Z</span>
+            </div>
+            {!collapsed && (
+              <div className="min-w-0">
+                <div className="font-mono-ui text-[9px] uppercase tracking-[0.35em] text-white/35 leading-none">Zyphron</div>
+                <div className="font-mono-ui text-[10px] uppercase tracking-[0.2em] text-white/70 leading-none mt-0.5">Control Plane</div>
               </div>
+            )}
+          </Link>
+          {!collapsed && (
+            <button
+              onClick={() => setCollapsed(true)}
+              className="ml-2 text-white/20 hover:text-white/60 transition-colors flex-shrink-0"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Expand button when collapsed */}
+        {collapsed && (
+          <button
+            onClick={() => setCollapsed(false)}
+            className="mt-2 mx-auto text-white/20 hover:text-white/60 transition-colors"
+          >
+            <ChevronRight className="h-3.5 w-3.5" />
+          </button>
+        )}
+
+        {/* Nav */}
+        <nav className="flex-1 overflow-y-auto scrollbar-hide py-4 space-y-5">
+          {NAV_SECTIONS.map((section) => (
+            <div key={section.label}>
               {!collapsed && (
-                <div>
-                  <p className="text-sm uppercase tracking-[0.25em] text-muted-foreground">Zyphron</p>
-                  <p className="font-semibold leading-none mt-1">Control Plane</p>
+                <div className="px-5 mb-1.5 font-mono-ui text-[8px] uppercase tracking-[0.35em] text-white/20">
+                  {section.label}
                 </div>
               )}
-            </Link>
+              <div className="space-y-px px-2">
+                {section.items.map((item) => {
+                  const active = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href + '/'));
+                  return (
+                    <Link
+                      key={item.name}
+                      href={item.href}
+                      title={collapsed ? item.name : undefined}
+                      className={cn(
+                        'group flex items-center gap-3 rounded px-3 py-2 transition-colors',
+                        collapsed && 'justify-center px-0 py-2.5',
+                        active
+                          ? 'bg-white/[0.07] text-white/90'
+                          : 'text-white/35 hover:text-white/65 hover:bg-white/[0.03]'
+                      )}
+                    >
+                      <item.icon className={cn('flex-shrink-0 transition-none', collapsed ? 'h-4 w-4' : 'h-3.5 w-3.5')} />
+                      {!collapsed && (
+                        <span className="font-mono-ui text-[10px] uppercase tracking-[0.2em]">
+                          {item.name}
+                        </span>
+                      )}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </nav>
 
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              onClick={() => setCollapsed((prev) => !prev)}
-            >
-              {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-            </Button>
-          </div>
-
-          <nav className="flex-1 p-3 space-y-1 overflow-y-auto scrollbar-hide">
-            {navigation.map((item, index) => {
-              const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
-
-              return (
-                <Link
-                  key={item.name}
-                  href={item.href}
-                  className={cn(
-                    'stagger-in',
-                    index < delayClasses.length ? delayClasses[index] : undefined,
-                    'group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-all duration-300 motion-safe:hover:translate-x-1',
-                    active
-                      ? 'bg-foreground text-background shadow-md'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-accent/60',
-                    collapsed && 'justify-center'
-                  )}
-                >
-                  <item.icon className={cn('h-5 w-5 flex-shrink-0 transition-transform duration-500 group-hover:-rotate-6 group-hover:scale-110', active ? 'text-background' : '')} />
-                  {!collapsed && <span className="font-medium">{item.name}</span>}
-                </Link>
-              );
-            })}
-          </nav>
-
-          <div className="p-3 border-t border-border/60 space-y-2">
-            <Button
-              variant="outline"
-              className={cn('w-full justify-start gap-3', collapsed && 'justify-center')}
-              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-            >
-              {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-              {!collapsed && <span>{theme === 'dark' ? 'Light Theme' : 'Dark Theme'}</span>}
-            </Button>
-
-            <Button
-              variant="ghost"
-              className={cn('w-full justify-start gap-3 text-muted-foreground', collapsed && 'justify-center')}
-              onClick={() => {
-                localStorage.removeItem('auth-token');
-                router.replace('/login');
-              }}
-            >
-              <LogOut className="h-4 w-4" />
-              {!collapsed && <span>Sign Out</span>}
-            </Button>
-          </div>
+        {/* Bottom */}
+        <div className={cn(
+          'flex-shrink-0 border-t border-white/[0.06] py-3 space-y-px',
+          collapsed ? 'px-2' : 'px-2'
+        )}>
+          <button
+            onClick={() => {
+              localStorage.removeItem('auth-token');
+              window.location.replace(`${LANDING_URL}/#access`);
+            }}
+            className={cn(
+              'w-full flex items-center gap-3 rounded px-3 py-2 text-white/25 hover:text-white/55 hover:bg-white/[0.03] transition-colors',
+              collapsed && 'justify-center px-0'
+            )}
+          >
+            <LogOut className={cn('flex-shrink-0', collapsed ? 'h-4 w-4' : 'h-3.5 w-3.5')} />
+            {!collapsed && <span className="font-mono-ui text-[10px] uppercase tracking-[0.2em]">Return to Landing</span>}
+          </button>
         </div>
       </aside>
 
-      <div className={cn('flex-1 transition-all duration-500', collapsed ? 'ml-20' : 'ml-72')}>
-        <header className="sticky top-0 z-30 h-20 border-b border-border/60 bg-background/70 backdrop-blur-xl">
-          <div className="h-full px-5 sm:px-8 flex items-center justify-between gap-4">
-            <div className="relative w-full max-w-md">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="Search projects, deployments, logs..."
-                className="h-11 w-full rounded-xl border border-input bg-card/80 pl-10 pr-4 text-sm outline-none transition-all duration-300 focus:border-foreground/35"
-              />
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Link href="/projects/new">
-                <Button className="gap-2 rounded-xl">
-                  <Plus className="h-4 w-4" />
-                  New Project
-                </Button>
-              </Link>
-              <Button
-                variant="outline"
-                size="icon"
-                className="relative rounded-xl"
-                onClick={() => router.push('/settings?tab=notifications')}
-              >
-                <Bell className="h-4 w-4" />
-                <span className="absolute -top-1 -right-1 size-4 rounded-full bg-foreground text-background text-[10px] flex items-center justify-center">
-                  3
-                </span>
-              </Button>
-            </div>
+      {/* ── Main ─────────────────────────────────────────────── */}
+      <div className={cn('flex-1 flex flex-col min-h-screen transition-all duration-500', collapsed ? 'ml-[60px]' : 'ml-[240px]')}>
+        {/* Header */}
+        <header className="sticky top-0 z-30 h-16 border-b border-white/[0.06] bg-background/80 backdrop-blur-xl flex items-center px-6 gap-4">
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-white/25" />
+            <input
+              type="text"
+              placeholder="Search..."
+              className="h-9 w-full rounded border border-white/[0.07] bg-white/[0.02] pl-9 pr-4 font-mono-ui text-[11px] text-white/70 placeholder:text-white/20 outline-none focus:border-white/20 transition-colors"
+            />
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            <Link href="/projects/new">
+              <button className="flex items-center gap-2 rounded border border-white/[0.08] bg-white/[0.03] px-3 py-2 font-mono-ui text-[10px] uppercase tracking-[0.2em] text-white/65 hover:bg-white/[0.06] hover:text-white/90 transition-colors">
+                <Plus className="h-3 w-3" />
+                New Project
+              </button>
+            </Link>
+            <button
+              onClick={() => router.push('/settings?tab=notifications')}
+              className="relative rounded border border-white/[0.07] bg-white/[0.02] p-2 text-white/30 hover:text-white/60 hover:bg-white/[0.05] transition-colors"
+            >
+              <Bell className="h-3.5 w-3.5" />
+              <span className="absolute -top-1 -right-1 h-3.5 w-3.5 rounded-full bg-white/70 text-black font-mono-ui text-[8px] flex items-center justify-center">3</span>
+            </button>
           </div>
         </header>
 
-        <main className="p-5 sm:p-8">
+        {/* Content */}
+        <main className="flex-1 p-6 md:p-8">
           <PageTransition>{children}</PageTransition>
         </main>
       </div>

@@ -53,17 +53,15 @@ const GRAFANA_PANELS = [
   { id: 'sre', label: 'SRE Overview', icon: Activity, uid: 'zyphron-sre', description: 'Request rate, latency percentiles, error rate, CPU/RAM' },
   { id: 'deployments', label: 'Deployments', icon: Zap, uid: 'zyphron-deployments', description: 'Build times, success rate, deployment frequency' },
   { id: 'stress', label: 'Load Tests', icon: Server, uid: 'zyphron-stress', description: 'k6 results: p50/p95/p99, error rate, req/s' },
-  { id: 'nodes', label: 'Node Metrics', icon: BarChart3, grafanaId: 1860, description: 'CPU, memory, disk, network per node' },
+  { id: 'nodes', label: 'Platform Metrics', icon: BarChart3, uid: 'zyphron-nodes', description: 'Prometheus targets, Redis memory, scrape health' },
 ] as const;
 
 type PanelId = (typeof GRAFANA_PANELS)[number]['id'];
 
 function grafanaUrl(dash: (typeof GRAFANA_PANELS)[number]): string {
   if (!GRAFANA_BASE) return '';
-  if ('grafanaId' in dash && dash.grafanaId) {
-    return `${GRAFANA_BASE}/d-solo/${dash.grafanaId}?orgId=1&refresh=30s&kiosk`;
-  }
-  return `${GRAFANA_BASE}/d/${'uid' in dash ? dash.uid : ''}?orgId=1&refresh=30s&kiosk`;
+  const uid = 'uid' in dash ? dash.uid : '';
+  return `${GRAFANA_BASE}/d/${uid}?orgId=1&refresh=30s&kiosk`;
 }
 
 // ─── Fallback data (shown only when no real data exists) ─────────────────────

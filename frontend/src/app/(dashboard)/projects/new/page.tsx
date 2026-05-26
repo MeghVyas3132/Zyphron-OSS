@@ -1,28 +1,35 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { 
-  ArrowLeft, 
-  Github, 
-  GitBranch, 
-  Folder, 
-  Loader2, 
-  CheckCircle2, 
+import {
+  ArrowLeft,
+  Github,
+  GitBranch,
+  Folder,
+  Loader2,
+  CheckCircle2,
   Search,
   RefreshCw,
   Lock,
   ExternalLink,
-  Zap
+  Zap,
+  KeyRound,
+  ChevronDown,
+  ChevronUp,
+  FileText,
+  Plus,
+  X,
+  Info,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { 
-  useGitHubAccount, 
-  useGitHubRepos, 
-  useAnalyzeRepo, 
+import {
+  useGitHubAccount,
+  useGitHubRepos,
+  useAnalyzeRepo,
   useGitHubBranches,
   useInitiateGitHubOAuth,
   useGitHubOAuthCallback,
@@ -31,31 +38,283 @@ import {
 } from '@/hooks/use-github';
 import { useCreateProject, useDeployProject } from '@/hooks/use-projects';
 
+const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3003';
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
 type Step = 'connect' | 'select' | 'configure' | 'deploying';
 
+interface EnvVar {
+  name: string;
+  required: boolean;
+  hasDefault: boolean;
+  purpose?: string;
+  example?: string;
+}
+
+interface EnvEntry { key: string; value: string }
+
+// ─── Framework icons ─────────────────────────────────────────────────────────
+
 const frameworkIcons: Record<string, string> = {
-  nextjs: '▲',
-  react: 'React',
-  vue: 'Vue',
-  nuxt: 'Vue',
-  svelte: 'Svelte',
-  sveltekit: 'Svelte',
-  angular: 'Angular',
-  express: 'Node',
-  fastify: 'Node',
-  nestjs: 'Nest',
-  flask: 'Python',
-  django: 'Python',
-  fastapi: 'Python',
-  go: 'Go',
-  rust: 'Rust',
-  astro: 'Launch',
-  remix: 'Remix',
-  static: 'Static',
-  docker: 'Docker',
-  python: 'Python',
-  unknown: 'Package',
+  nextjs: 'Next', react: 'React', vue: 'Vue', nuxt: 'Vue',
+  svelte: 'Svelte', sveltekit: 'Svelte', angular: 'Angular',
+  express: 'Node', fastify: 'Node', nestjs: 'Nest',
+  flask: 'Python', django: 'Python', fastapi: 'Python',
+  go: 'Go', rust: 'Rust', astro: 'Astro', remix: 'Remix',
+  static: 'Static', docker: 'Docker', python: 'Python', unknown: 'Pkg',
 };
+
+// ─── Env paste parser ─────────────────────────────────────────────────────────
+
+function parseEnvFile(text: string): EnvEntry[] {
+  return text.split('\n')
+    .map(line => line.trim())
+    .filter(line => line && !line.startsWith('#'))
+    .flatMap(line => {
+      const eq = line.indexOf('=');
+      if (eq === -1) return [];
+      const key = line.slice(0, eq).trim();
+      let value = line.slice(eq + 1).trim();
+      // Strip surrounding quotes
+      if ((value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1);
+      }
+      return key ? [{ key, value }] : [];
+    });
+}
+
+// ─── ENV panel component ─────────────────────────────────────────────────────
+
+function EnvPanel({
+  repoUrl,
+  envEntries,
+  setEnvEntries,
+}: {
+  repoUrl: string;
+  envEntries: EnvEntry[];
+  setEnvEntries: (e: EnvEntry[]) => void;
+}) {
+  const [scanned, setScanned] = useState<EnvVar[]>([]);
+  const [scanning, setScanning] = useState(false);
+  const [scanDone, setScanDone] = useState(false);
+  const [showPaste, setShowPaste] = useState(false);
+  const [pasteText, setPasteText] = useState('');
+  const [expanded, setExpanded] = useState(true);
+
+  // Auto-scan when component mounts
+  useEffect(() => {
+    if (!repoUrl || scanDone) return;
+    let cancelled = false;
+    const scan = async () => {
+      setScanning(true);
+      try {
+        const token = localStorage.getItem('auth-token');
+        const res = await fetch(`${API}/api/v1/projects/scan-env`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ repositoryUrl: repoUrl }),
+        });
+        if (!cancelled && res.ok) {
+          const json = await res.json() as { data?: { vars?: EnvVar[] } };
+          const vars = json.data?.vars ?? [];
+          setScanned(vars);
+          // Pre-fill entries for vars not already in envEntries
+          if (vars.length > 0) {
+            const existing = new Set(envEntries.map(e => e.key));
+            const newEntries = vars
+              .filter(v => !existing.has(v.name))
+              .map(v => ({ key: v.name, value: v.example && !v.required ? v.example : '' }));
+            if (newEntries.length > 0) {
+              setEnvEntries([...envEntries, ...newEntries]);
+            }
+          }
+        }
+      } catch { /* ignore scan errors */ }
+      finally {
+        if (!cancelled) { setScanning(false); setScanDone(true); }
+      }
+    };
+    void scan();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repoUrl]);
+
+  const applyPaste = () => {
+    const parsed = parseEnvFile(pasteText);
+    if (!parsed.length) return;
+    // Merge: paste overwrites existing keys, adds new ones
+    const merged = new Map(envEntries.map(e => [e.key, e.value]));
+    parsed.forEach(({ key, value }) => merged.set(key, value));
+    setEnvEntries(Array.from(merged.entries()).map(([key, value]) => ({ key, value })));
+    setPasteText('');
+    setShowPaste(false);
+  };
+
+  const updateEntry = (idx: number, field: 'key' | 'value', val: string) => {
+    setEnvEntries(envEntries.map((e, i) => i === idx ? { ...e, [field]: val } : e));
+  };
+
+  const removeEntry = (idx: number) => {
+    setEnvEntries(envEntries.filter((_, i) => i !== idx));
+  };
+
+  const addBlank = () => {
+    setEnvEntries([...envEntries, { key: '', value: '' }]);
+  };
+
+  const purposeFor = (key: string) => scanned.find(v => v.name === key)?.purpose;
+  const requiredFor = (key: string) => scanned.find(v => v.name === key)?.required ?? false;
+
+  return (
+    <div className="rounded-lg border bg-card overflow-hidden">
+      {/* Header */}
+      <button
+        type="button"
+        onClick={() => setExpanded(e => !e)}
+        className="w-full flex items-center justify-between px-6 py-4 hover:bg-muted/30 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <KeyRound className="h-5 w-5 text-muted-foreground" />
+          <div className="text-left">
+            <p className="font-semibold">Environment Variables</p>
+            <p className="text-sm text-muted-foreground">
+              {scanning
+                ? 'Scanning repo for required variables…'
+                : scanDone && scanned.length > 0
+                ? `${scanned.length} variable${scanned.length !== 1 ? 's' : ''} detected from source code`
+                : envEntries.length > 0
+                ? `${envEntries.filter(e => e.key && e.value).length} of ${envEntries.length} variable${envEntries.length !== 1 ? 's' : ''} filled`
+                : 'Optional — add at any time from project settings'}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {scanning && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+          {envEntries.filter(e => e.key && e.value).length > 0 && (
+            <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium">
+              {envEntries.filter(e => e.key && e.value).length} set
+            </span>
+          )}
+          {expanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="px-6 pb-6 space-y-4 border-t border-border/40">
+          {/* Paste .env button */}
+          <div className="flex items-center justify-between pt-4">
+            <p className="text-sm text-muted-foreground">
+              {scanned.length > 0
+                ? 'Detected from your source code — fill in the values below'
+                : 'No env file detected — add variables manually or paste your .env file'}
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-2 flex-shrink-0"
+              onClick={() => setShowPaste(p => !p)}
+            >
+              <FileText className="h-4 w-4" />
+              Paste .env file
+            </Button>
+          </div>
+
+          {/* Paste textarea */}
+          {showPaste && (
+            <div className="space-y-2 p-4 rounded-lg border border-border/60 bg-muted/20">
+              <p className="text-sm font-medium flex items-center gap-2">
+                <FileText className="h-4 w-4" />
+                Paste your <code className="font-mono text-xs bg-muted px-1 rounded">.env</code> file contents
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Copy the entire contents of your <code className="font-mono bg-muted px-1 rounded">.env</code> file and paste it here. Comments are ignored.
+              </p>
+              <textarea
+                className="w-full h-48 font-mono text-xs rounded-md border border-input bg-background px-3 py-2 resize-y focus:outline-none focus:ring-2 focus:ring-ring"
+                placeholder={'DATABASE_URL=postgresql://user:pass@localhost:5432/mydb\nJWT_SECRET=your-secret-key\nNEXT_PUBLIC_API_URL=https://api.example.com\n# Comments are ignored'}
+                value={pasteText}
+                onChange={e => setPasteText(e.target.value)}
+                spellCheck={false}
+                autoCapitalize="off"
+                autoCorrect="off"
+              />
+              <div className="flex gap-2">
+                <Button type="button" size="sm" onClick={applyPaste} disabled={!pasteText.trim()}>
+                  Apply {pasteText.trim() ? `(${parseEnvFile(pasteText).length} vars)` : ''}
+                </Button>
+                <Button type="button" variant="ghost" size="sm" onClick={() => { setShowPaste(false); setPasteText(''); }}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Variable rows */}
+          {envEntries.length > 0 && (
+            <div className="space-y-2">
+              {envEntries.map((entry, idx) => {
+                const purpose = purposeFor(entry.key);
+                const required = requiredFor(entry.key);
+                return (
+                  <div key={idx} className="grid grid-cols-[1fr_1fr_auto] gap-2 items-start">
+                    <div className="space-y-1">
+                      <Input
+                        className="font-mono text-sm h-9"
+                        placeholder="VARIABLE_NAME"
+                        value={entry.key}
+                        onChange={e => updateEntry(idx, 'key', e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, '_'))}
+                        spellCheck={false}
+                      />
+                      {required && (
+                        <p className="text-xs text-amber-500 flex items-center gap-1 px-1">
+                          <Info className="h-3 w-3" /> Required
+                        </p>
+                      )}
+                    </div>
+                    <div className="space-y-1">
+                      <Input
+                        className="font-mono text-sm h-9"
+                        placeholder={purpose || 'value'}
+                        value={entry.value}
+                        type={entry.key.match(/SECRET|PASSWORD|TOKEN|KEY|PASS/i) ? 'password' : 'text'}
+                        onChange={e => updateEntry(idx, 'value', e.target.value)}
+                        spellCheck={false}
+                        autoComplete="off"
+                      />
+                      {purpose && (
+                        <p className="text-xs text-muted-foreground px-1 truncate">{purpose}</p>
+                      )}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-9 w-9 text-muted-foreground hover:text-red-400 flex-shrink-0"
+                      onClick={() => removeEntry(idx)}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Add row */}
+          <Button type="button" variant="outline" size="sm" className="gap-2 w-full" onClick={addBlank}>
+            <Plus className="h-4 w-4" />
+            Add Variable
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function NewProjectPage() {
   const router = useRouter();
@@ -77,6 +336,7 @@ export default function NewProjectPage() {
   const [analysis, setAnalysis] = useState<RepoAnalysis | null>(null);
   const [gitUrl, setGitUrl] = useState('');
   const [connectError, setConnectError] = useState('');
+  const [envEntries, setEnvEntries] = useState<EnvEntry[]>([]);
 
   // GitHub queries
   const { data: githubAccount, isLoading: accountLoading, refetch: refetchAccount } = useGitHubAccount();
@@ -85,93 +345,71 @@ export default function NewProjectPage() {
   const initiateOAuth = useInitiateGitHubOAuth();
   const oauthCallback = useGitHubOAuthCallback();
 
-  // Handle OAuth callback
   useEffect(() => {
     const code = searchParams.get('code');
     const state = searchParams.get('state');
-    
     if (code && state) {
       oauthCallback.mutate({ code, state }, {
-        onSuccess: () => {
-          router.replace('/projects/new');
-          refetchAccount();
-        },
-        onError: (error) => {
-          console.error('OAuth callback error:', error);
-        },
+        onSuccess: () => { router.replace('/projects/new'); refetchAccount(); },
+        onError: (error) => { console.error('OAuth callback error:', error); },
       });
     }
   }, [searchParams, oauthCallback, router, refetchAccount]);
 
-  // Determine initial step based on GitHub connection
   useEffect(() => {
     if (!accountLoading) {
-      if (githubAccount?.data?.connected) {
-        setStep('select');
-      } else {
-        setStep('connect');
-      }
+      setStep(githubAccount?.data?.connected ? 'select' : 'connect');
     }
   }, [githubAccount, accountLoading]);
 
-  // Repository analysis
   const repoOwner = selectedRepo?.fullName?.split('/')[0] || '';
   const repoName = selectedRepo?.fullName?.split('/')[1] || '';
-  const { data: analysisData, isLoading: analysisLoading } = useAnalyzeRepo(
-    repoOwner,
-    repoName,
-    projectConfig.branch,
-    githubConnected
-  );
+  const { data: analysisData, isLoading: analysisLoading } = useAnalyzeRepo(repoOwner, repoName, projectConfig.branch, githubConnected);
   const { data: branchesData } = useGitHubBranches(repoOwner, repoName, githubConnected);
 
-  // Update analysis when data changes
   useEffect(() => {
     if (analysisData?.data) {
       setAnalysis(analysisData.data);
-      const suggested = analysisData.data.suggestedConfig;
-      setProjectConfig((prev) => ({
+      const s = analysisData.data.suggestedConfig;
+      setProjectConfig(prev => ({
         ...prev,
-        name: suggested.name || prev.name,
-        slug: suggested.slug || prev.slug,
-        branch: suggested.branch || prev.branch,
-        buildCommand: suggested.buildCommand || '',
-        installCommand: suggested.installCommand || '',
-        startCommand: suggested.startCommand || '',
-        outputDirectory: suggested.outputDirectory || '',
+        name: s.name || prev.name,
+        slug: s.slug || prev.slug,
+        branch: s.branch || prev.branch,
+        buildCommand: s.buildCommand || '',
+        installCommand: s.installCommand || '',
+        startCommand: s.startCommand || '',
+        outputDirectory: s.outputDirectory || '',
       }));
     }
   }, [analysisData]);
 
-  // Project creation
   const createProject = useCreateProject();
   const deployProject = useDeployProject();
 
   const repos = reposData?.data || [];
   const branches = branchesData?.data || [];
-
-  const filteredRepos = repos.filter(
-    (repo) =>
-      repo.name.toLowerCase().includes(search.toLowerCase()) ||
-      repo.fullName.toLowerCase().includes(search.toLowerCase()) ||
-      (repo.description?.toLowerCase().includes(search.toLowerCase()) ?? false)
+  const filteredRepos = repos.filter(repo =>
+    repo.name.toLowerCase().includes(search.toLowerCase()) ||
+    repo.fullName.toLowerCase().includes(search.toLowerCase()) ||
+    (repo.description?.toLowerCase().includes(search.toLowerCase()) ?? false)
   );
 
   const handleConnectGitHub = () => {
     setConnectError('');
     initiateOAuth.mutate(undefined, {
       onError: (error) => {
-        const message = error instanceof Error ? error.message : 'GitHub OAuth is not available in this environment.';
-        setConnectError(message);
+        setConnectError(error instanceof Error ? error.message : 'GitHub OAuth is not available in this environment.');
       },
     });
   };
 
   const handleSelectRepo = (repo: GitHubRepo) => {
     setSelectedRepo(repo);
-    setProjectConfig((prev) => ({
+    setEnvEntries([]); // reset env for new repo
+    setProjectConfig(prev => ({
       ...prev,
-      name: repo.name.split('-').map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(' '),
+      name: repo.name.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
       slug: repo.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
       branch: repo.defaultBranch,
       rootDirectory: './',
@@ -181,12 +419,10 @@ export default function NewProjectPage() {
 
   const handleImportUrl = () => {
     if (!gitUrl) return;
-    
-    const match = gitUrl.match(/github\.com\/([^\/]+)\/([^\/]+)/);
+    const match = gitUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
     if (match) {
       const [, owner, name] = match;
       const repoName = name.replace(/\.git$/, '');
-      
       setSelectedRepo({
         id: 'url-import',
         name: repoName,
@@ -203,25 +439,27 @@ export default function NewProjectPage() {
         stars: 0,
         forks: 0,
       });
-      
-      setProjectConfig((prev) => ({
+      setProjectConfig(prev => ({
         ...prev,
-        name: repoName.split('-').map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(' '),
+        name: repoName.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
         slug: repoName.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
         branch: 'main',
         rootDirectory: './',
       }));
-      
+      setEnvEntries([]);
       setStep('configure');
     }
   };
 
+  const generateSlug = (name: string) =>
+    name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
   const handleCreate = async () => {
     if (!selectedRepo) return;
-
     setStep('deploying');
-
     try {
+      const cleanedEnv = envEntries.filter(e => e.key.trim() && e.value.trim());
+
       const project = await createProject.mutateAsync({
         name: projectConfig.name,
         slug: projectConfig.slug,
@@ -233,48 +471,36 @@ export default function NewProjectPage() {
         startCommand: projectConfig.startCommand || undefined,
         outputDirectory: projectConfig.outputDirectory || undefined,
         autoDeploy: true,
-      });
+        // Pass env vars to be stored immediately
+        ...(cleanedEnv.length > 0 ? {
+          envVariables: cleanedEnv.map(e => ({
+            key: e.key,
+            value: e.value,
+            environment: 'PRODUCTION' as const,
+          })),
+        } : {}),
+      } as Parameters<typeof createProject.mutateAsync>[0]);
 
       const createdProject = project?.data && typeof project.data === 'object' && 'project' in project.data
         ? (project.data.project as { slug?: string })
         : (project.data as { slug?: string });
       const createdSlug = createdProject?.slug;
 
-      if (!createdSlug) {
-        throw new Error('Project was created but slug was not returned by API.');
-      }
+      if (!createdSlug) throw new Error('Project was created but slug was not returned by API.');
 
-      await deployProject.mutateAsync({
-        slug: createdSlug,
-        branch: projectConfig.branch,
-      });
-
+      await deployProject.mutateAsync({ slug: createdSlug, branch: projectConfig.branch });
       router.push(`/projects/${createdSlug}`);
     } catch (error) {
       if (error instanceof Error && error.message.includes('status 409')) {
         const suffix = String(Date.now()).slice(-4);
-        setProjectConfig((prev) => ({
-          ...prev,
-          slug: `${generateSlug(prev.name || selectedRepo.name)}-${suffix}`,
-        }));
+        setProjectConfig(prev => ({ ...prev, slug: `${generateSlug(prev.name || selectedRepo!.name)}-${suffix}` }));
       }
       setStep('configure');
     }
   };
 
-  const generateSlug = (name: string) => {
-    return name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '');
-  };
-
   const formatDate = (date: string) => {
-    const d = new Date(date);
-    const now = new Date();
-    const diffMs = now.getTime() - d.getTime();
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-    
+    const diffDays = Math.floor((Date.now() - new Date(date).getTime()) / 86400000);
     if (diffDays === 0) return 'Today';
     if (diffDays === 1) return 'Yesterday';
     if (diffDays < 7) return `${diffDays} days ago`;
@@ -298,9 +524,7 @@ export default function NewProjectPage() {
       {/* Header */}
       <div className="flex items-center gap-4">
         <Link href="/projects">
-          <Button variant="ghost" size="icon">
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
+          <Button variant="ghost" size="icon"><ArrowLeft className="h-5 w-5" /></Button>
         </Link>
         <div>
           <h1 className="text-2xl font-bold">Create New Project</h1>
@@ -319,7 +543,7 @@ export default function NewProjectPage() {
         <StepIndicator number={4} label="Deploy" active={step === 'deploying'} completed={false} />
       </div>
 
-      {/* Step: Connect GitHub */}
+      {/* ── Step: Connect GitHub ── */}
       {step === 'connect' && (
         <div className="space-y-6">
           <div className="rounded-lg border bg-card p-8 text-center">
@@ -332,9 +556,7 @@ export default function NewProjectPage() {
               {initiateOAuth.isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Github className="h-5 w-5" />}
               Connect GitHub
             </Button>
-            {connectError && (
-              <p className="text-sm text-red-500 mt-4">{connectError}</p>
-            )}
+            {connectError && <p className="text-sm text-red-500 mt-4">{connectError}</p>}
           </div>
 
           <div className="relative">
@@ -355,7 +577,7 @@ export default function NewProjectPage() {
         </div>
       )}
 
-      {/* Step: Select Repository */}
+      {/* ── Step: Select Repository ── */}
       {step === 'select' && (
         <div className="space-y-4">
           {githubAccount?.data && (
@@ -363,11 +585,7 @@ export default function NewProjectPage() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   {githubAccount.data.avatarUrl && (
-                    <img
-                      src={githubAccount.data.avatarUrl ?? ''}
-                      alt={githubAccount.data.username ?? 'GitHub avatar'}
-                      className="h-10 w-10 rounded-full"
-                    />
+                    <img src={githubAccount.data.avatarUrl ?? ''} alt="GitHub avatar" className="h-10 w-10 rounded-full" />
                   )}
                   <div>
                     <p className="font-medium">{githubAccount.data.name || githubAccount.data.username}</p>
@@ -422,9 +640,9 @@ export default function NewProjectPage() {
 
           {reposData?.pagination && (
             <div className="flex items-center justify-between">
-              <Button variant="outline" size="sm" onClick={() => setRepoPage((p) => Math.max(1, p - 1))} disabled={!reposData.pagination.hasPrevPage}>Previous</Button>
+              <Button variant="outline" size="sm" onClick={() => setRepoPage(p => Math.max(1, p - 1))} disabled={!reposData.pagination.hasPrevPage}>Previous</Button>
               <span className="text-sm text-muted-foreground">Page {reposData.pagination.page}</span>
-              <Button variant="outline" size="sm" onClick={() => setRepoPage((p) => p + 1)} disabled={!reposData.pagination.hasNextPage}>Next</Button>
+              <Button variant="outline" size="sm" onClick={() => setRepoPage(p => p + 1)} disabled={!reposData.pagination.hasNextPage}>Next</Button>
             </div>
           )}
 
@@ -440,7 +658,7 @@ export default function NewProjectPage() {
         </div>
       )}
 
-      {/* Step: Configure */}
+      {/* ── Step: Configure ── */}
       {step === 'configure' && selectedRepo && (
         <div className="space-y-6">
           <div className="rounded-lg border bg-card p-4">
@@ -470,12 +688,13 @@ export default function NewProjectPage() {
                     <Zap className="h-4 w-4 text-yellow-500" />
                     Auto-detected: {analysis.detection.framework.charAt(0).toUpperCase() + analysis.detection.framework.slice(1)}
                   </p>
-                  <p className="text-sm text-muted-foreground">{analysis.detection.language} • Port {analysis.detection.port}</p>
+                  <p className="text-sm text-muted-foreground">{analysis.detection.language} · Port {analysis.detection.port}</p>
                 </div>
               </div>
             </div>
           )}
 
+          {/* Project Settings */}
           <div className="rounded-lg border bg-card p-6 space-y-4">
             <h3 className="font-semibold">Project Settings</h3>
             <div className="grid gap-4 md:grid-cols-2">
@@ -486,12 +705,12 @@ export default function NewProjectPage() {
               <div className="space-y-2">
                 <Label htmlFor="slug">Project Slug</Label>
                 <Input id="slug" value={projectConfig.slug} onChange={(e) => setProjectConfig({ ...projectConfig, slug: generateSlug(e.target.value) })} placeholder="my-awesome-project" />
-                <p className="text-xs text-muted-foreground">{projectConfig.slug}.zyphron.app</p>
+                <p className="text-xs text-muted-foreground">{projectConfig.slug}.zyphron.space</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="branch">Branch</Label>
                 <select id="branch" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={projectConfig.branch} onChange={(e) => setProjectConfig({ ...projectConfig, branch: e.target.value })}>
-                  {branches.length > 0 ? branches.map((branch) => <option key={branch.name} value={branch.name}>{branch.name} {branch.protected && '(protected)'}</option>) : <option value={selectedRepo.defaultBranch}>{selectedRepo.defaultBranch}</option>}
+                  {branches.length > 0 ? branches.map(b => <option key={b.name} value={b.name}>{b.name}{b.protected ? ' (protected)' : ''}</option>) : <option value={selectedRepo.defaultBranch}>{selectedRepo.defaultBranch}</option>}
                 </select>
               </div>
               <div className="space-y-2">
@@ -504,10 +723,11 @@ export default function NewProjectPage() {
             </div>
           </div>
 
+          {/* Build Settings */}
           <div className="rounded-lg border bg-card p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold">Build & Output Settings</h3>
-              <span className="text-xs text-muted-foreground">Optional - Auto-detected if empty</span>
+              <span className="text-xs text-muted-foreground">Optional — auto-detected if empty</span>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
@@ -529,16 +749,30 @@ export default function NewProjectPage() {
             </div>
           </div>
 
-          <div className="flex items-center justify-between pt-4">
+          {/* ── ENV Detection Panel ── */}
+          <EnvPanel
+            repoUrl={selectedRepo.cloneUrl || selectedRepo.url}
+            envEntries={envEntries}
+            setEnvEntries={setEnvEntries}
+          />
+
+          <div className="flex items-center justify-between pt-2">
             <Button variant="outline" onClick={() => setStep('select')}>Back</Button>
-            <Button onClick={handleCreate} disabled={createProject.isPending || !projectConfig.name || !projectConfig.slug} size="lg" className="gap-2">
-              {createProject.isPending ? <><Loader2 className="h-4 w-4 animate-spin" />Creating...</> : <><Zap className="h-4 w-4" />Deploy</>}
+            <Button
+              onClick={handleCreate}
+              disabled={createProject.isPending || !projectConfig.name || !projectConfig.slug}
+              size="lg"
+              className="gap-2"
+            >
+              {createProject.isPending
+                ? <><Loader2 className="h-4 w-4 animate-spin" />Creating...</>
+                : <><Zap className="h-4 w-4" />Deploy{envEntries.filter(e => e.key && e.value).length > 0 ? ` with ${envEntries.filter(e => e.key && e.value).length} env vars` : ''}</>}
             </Button>
           </div>
         </div>
       )}
 
-      {/* Step: Deploying */}
+      {/* ── Step: Deploying ── */}
       {step === 'deploying' && (
         <div className="rounded-lg border bg-card p-12 text-center">
           <div className="relative inline-flex">

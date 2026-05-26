@@ -79,8 +79,8 @@ const config: Config = {
         sm: 'calc(var(--radius) - 4px)',
       },
       fontFamily: {
-        sans: ['"Avenir Next"', '"SF Pro Display"', '"Segoe UI"', '"Helvetica Neue"', 'sans-serif'],
-        mono: ['"IBM Plex Mono"', '"SF Mono"', 'Menlo', 'monospace'],
+        sans: ['var(--font-display)', 'Syne', '"SF Pro Display"', 'sans-serif'],
+        mono: ['var(--font-mono)', '"JetBrains Mono"', '"IBM Plex Mono"', 'monospace'],
       },
       keyframes: {
         'accordion-down': {

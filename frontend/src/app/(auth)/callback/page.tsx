@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
+const LANDING_URL = process.env.NEXT_PUBLIC_LANDING_URL ?? 'https://zyphron.space';
+
 export default function AuthCallbackPage() {
   const router = useRouter();
   const params = useSearchParams();
@@ -24,7 +26,7 @@ export default function AuthCallbackPage() {
         google_failed: 'Google login failed. Please try again.',
       };
       toast.error(messages[error] || 'Authentication failed.');
-      router.replace('/login');
+      window.location.replace(`${LANDING_URL}/#access`);
       return;
     }
 
@@ -34,7 +36,7 @@ export default function AuthCallbackPage() {
       router.replace('/dashboard');
     } else {
       toast.error('No authentication token received.');
-      router.replace('/login');
+      window.location.replace(`${LANDING_URL}/#access`);
     }
   }, [params, router]);
 

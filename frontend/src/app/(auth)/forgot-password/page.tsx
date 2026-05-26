@@ -11,6 +11,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
+const LANDING_URL = process.env.NEXT_PUBLIC_LANDING_URL ?? 'https://zyphron.space';
+
 const schema = z.object({
   email: z.string().email('Please enter a valid email'),
 });
@@ -78,7 +80,7 @@ export default function ForgotPasswordPage() {
           </button>
           .
         </p>
-        <Link href="/login">
+        <Link href={`${LANDING_URL}/#access`}>
           <Button variant="outline" className="w-full h-11 rounded-xl gap-2">
             <ArrowLeft className="h-4 w-4" />
             Back to Sign In
@@ -120,7 +122,7 @@ export default function ForgotPasswordPage() {
         </Button>
       </form>
 
-      <Link href="/login">
+      <Link href={`${LANDING_URL}/#access`}>
         <Button variant="ghost" className="w-full gap-2 text-muted-foreground">
           <ArrowLeft className="h-4 w-4" />
           Back to Sign In

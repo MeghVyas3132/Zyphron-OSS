@@ -5,6 +5,8 @@ import { authApi, type User } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
+const LANDING_URL = process.env.NEXT_PUBLIC_LANDING_URL ?? 'https://zyphron.space';
+
 // Query keys
 export const authKeys = {
   user: ['auth', 'user'] as const,
@@ -60,7 +62,6 @@ export function useRegister() {
 
 export function useLogout() {
   const queryClient = useQueryClient();
-  const router = useRouter();
 
   return useMutation({
     mutationFn: async () => {
@@ -69,8 +70,8 @@ export function useLogout() {
     onSuccess: () => {
       // Clear all queries
       queryClient.clear();
-      // Redirect to login
-      router.push('/login');
+      // Redirect back to the landing page access section
+      window.location.replace(`${LANDING_URL}/#access`);
     },
   });
 }
@@ -98,7 +99,7 @@ export function useAuth(options?: { required?: boolean }) {
     const token = typeof window !== 'undefined' ? localStorage.getItem('auth-token') : null;
     
     if (!token && required) {
-      router.push('/login');
+      window.location.replace(`${LANDING_URL}/#access`);
       return;
     }
 
@@ -109,7 +110,7 @@ export function useAuth(options?: { required?: boolean }) {
           localStorage.removeItem('auth-token');
         }
         if (required) {
-          router.push('/login');
+          window.location.replace(`${LANDING_URL}/#access`);
         }
       } else {
         setIsAuthenticated(true);
