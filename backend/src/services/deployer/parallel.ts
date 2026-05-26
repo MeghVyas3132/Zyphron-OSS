@@ -208,6 +208,35 @@ const MANAGED_SERVICES: Record<string, {
   },
 };
 
+// ── Aliases: common service names → MANAGED_SERVICES keys ───
+const MANAGED_SERVICE_ALIASES: Record<string, string> = {
+  postgres:  'postgresql',
+  pg:        'postgresql',
+  mariadb:   'mysql',
+  mongo:     'mongodb',
+};
+
+function pickPrimaryPublicServiceName(services: Array<Pick<ServiceDefinition, 'name' | 'internalOnly'>>): string | undefined {
+  const publicServices = services.filter((service) => !service.internalOnly);
+  return publicServices.find((service) => /^(frontend|web|client|app)$/i.test(service.name))?.name ?? publicServices[0]?.name;
+}
+
+function resolveParallelManagedConfig(service: ServiceDefinition) {
+  if (MANAGED_SERVICES[service.name]) return MANAGED_SERVICES[service.name];
+  const aliased = MANAGED_SERVICE_ALIASES[service.name.toLowerCase()];
+  if (aliased && MANAGED_SERVICES[aliased]) return MANAGED_SERVICES[aliased];
+  if (service.image) {
+    const base = service.image.split(':')[0].split('/').pop()?.toLowerCase() ?? '';
+    if (MANAGED_SERVICES[base]) return MANAGED_SERVICES[base];
+    const aliasedImg = MANAGED_SERVICE_ALIASES[base];
+    if (aliasedImg && MANAGED_SERVICES[aliasedImg]) return MANAGED_SERVICES[aliasedImg];
+    for (const [key, cfg] of Object.entries(MANAGED_SERVICES)) {
+      if (base.startsWith(key) || key.startsWith(base)) return cfg;
+    }
+  }
+  return undefined;
+}
+
 // ===========================================
 // PARALLEL DEPLOYER CLASS
 // ===========================================
@@ -247,6 +276,8 @@ export class ParallelMultiServiceDeployer extends TypedEventEmitter {
 
     const startTime = Date.now();
     const deployIdShort = deploymentId.substring(0, 8);
+    const primaryPublicServiceName = pickPrimaryPublicServiceName(config.services);
+    const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
 
     this.emit('start', { deploymentId, serviceCount: config.services.length });
     logger.info({ 
@@ -335,6 +366,8 @@ export class ParallelMultiServiceDeployer extends TypedEventEmitter {
         projectSlug,
         networkName,
         { ...envVars, ...connectionEnv },
+        primaryPublicServiceName,
+        protocol,
         maxConcurrentDeploys
       );
 
@@ -358,24 +391,52 @@ export class ParallelMultiServiceDeployer extends TypedEventEmitter {
       // Compile results
       // ===========================================
       const totalDuration = Date.now() - startTime;
+
+      // Include failed builds as failed service entries so they appear in the result
+      const failedBuildResults = buildResults
+        .filter(r => !r.buildResult?.success)
+        .map(r => ({
+          ...r,
+          status: 'failed' as const,
+          error: r.error || r.buildResult?.error || 'Build failed',
+        }));
+
       const allResults = [...managedResults, ...deployResults];
-      const allSuccess = allResults.every(r => r.status === 'running');
+
+      // Deployment is successful only if all APP services built and deployed successfully
+      // (managed services like postgres/redis don't count toward app health)
+      const failedBuildCount = failedBuildResults.length;
+      const appServiceCount = appServices.length;
+      const appSuccess = appServiceCount === 0 || (failedBuildCount === 0 && deployResults.every(r => r.status === 'running'));
+      const allSuccess = appSuccess && managedResults.every(r => r.status === 'running');
 
       const result: ParallelDeployResult = {
         success: allSuccess,
         deploymentId,
         projectId,
         networkName,
-        services: allResults.map(r => ({
-          name: r.service.name,
-          status: r.status === 'running' ? 'running' : 'failed',
-          containerId: r.containerId,
-          containerName: r.containerName,
-          internalUrl: r.internalUrl,
-          externalUrl: r.externalUrl,
-          port: r.service.port,
-          error: r.error,
-        })),
+        services: [
+          ...allResults.map(r => ({
+            name: r.service.name,
+            status: (r.status === 'running' ? 'running' : 'failed') as 'running' | 'failed',
+            containerId: r.containerId,
+            containerName: r.containerName,
+            internalUrl: r.internalUrl,
+            externalUrl: r.externalUrl,
+            port: r.service.port,
+            error: r.error,
+          })),
+          ...failedBuildResults.map(r => ({
+            name: r.service.name,
+            status: 'failed' as const,
+            containerId: undefined,
+            containerName: undefined,
+            internalUrl: undefined,
+            externalUrl: undefined,
+            port: r.service.port,
+            error: r.error,
+          })),
+        ],
         totalBuildTime: buildDuration,
         totalDeployTime: deployDuration,
         totalDuration,
@@ -388,8 +449,10 @@ export class ParallelMultiServiceDeployer extends TypedEventEmitter {
         totalDuration,
         buildDuration,
         deployDuration,
-        serviceCount: allResults.length,
+        serviceCount: appServiceCount + managedServices.length,
         successCount: allResults.filter(r => r.status === 'running').length,
+        failedBuildCount,
+        success: allSuccess,
       }, 'Parallel deployment completed');
 
       return result;
@@ -570,9 +633,9 @@ export class ParallelMultiServiceDeployer extends TypedEventEmitter {
       try {
         task.status = 'deploying';
         
-        const managedConfig = MANAGED_SERVICES[service.name];
+        const managedConfig = resolveParallelManagedConfig(service);
         if (!managedConfig) {
-          throw new Error(`Unknown managed service: ${service.name}`);
+          throw new Error(`Unknown managed service: "${service.name}" (image: ${service.image ?? 'none'}). Supported: postgresql, mysql, mongodb, redis, rabbitmq, elasticsearch.`);
         }
 
         const containerName = `zyphron-${projectSlug}-${service.name}-${deploymentId.substring(0, 8)}`;
@@ -656,6 +719,8 @@ export class ParallelMultiServiceDeployer extends TypedEventEmitter {
     projectSlug: string,
     networkName: string,
     envVars: Record<string, string>,
+    primaryPublicServiceName: string | undefined,
+    protocol: string,
     maxConcurrent: number
   ): Promise<ServiceDeployTask[]> {
     const semaphore = new Semaphore(maxConcurrent);
@@ -711,18 +776,26 @@ export class ParallelMultiServiceDeployer extends TypedEventEmitter {
         }).map(([k, v]) => `${k}=${v}`);
 
         // Traefik labels for external routing
+        const publicHost = primaryPublicServiceName && service.name === primaryPublicServiceName
+          ? projectSlug
+          : `${projectSlug}-${service.name}`;
+
         const traefikLabels: Record<string, string> = service.internalOnly ? {} : {
           'traefik.enable': 'true',
-          [`traefik.http.routers.${containerName}.rule`]: `Host(\`${projectSlug}-${service.name}.${this.domain}\`)`,
-          [`traefik.http.routers.${containerName}.entrypoints`]: 'web',
+          [`traefik.http.routers.${containerName}.rule`]: `Host(\`${publicHost}.${this.domain}\`)`,
+          [`traefik.http.routers.${containerName}.entrypoints`]: protocol === 'https' ? 'websecure' : 'web',
           [`traefik.http.routers.${containerName}.service`]: containerName,
           [`traefik.http.services.${containerName}.loadbalancer.server.port`]: port.toString(),
+          ...(protocol === 'https' ? {
+            [`traefik.http.routers.${containerName}.tls.certresolver`]: 'letsencrypt',
+          } : {}),
         };
 
         // Create container
         const container = await this.docker.createContainer({
           name: containerName,
           Image: fullImageName,
+          Cmd: service.command,  // Override CMD from docker-compose if specified
           Env: env,
           ExposedPorts: { [`${port}/tcp`]: {} },
           HostConfig: {
@@ -754,7 +827,7 @@ export class ParallelMultiServiceDeployer extends TypedEventEmitter {
         task.containerId = container.id;
         task.containerName = containerName;
         task.internalUrl = `http://${containerName}:${port}`;
-        task.externalUrl = service.internalOnly ? undefined : `http://${projectSlug}-${service.name}.${this.domain}`;
+        task.externalUrl = service.internalOnly ? undefined : `${protocol}://${publicHost}.${this.domain}`;
         task.status = 'running';
 
         this.emit('service:deploy:complete', { 
@@ -970,6 +1043,8 @@ export class ParallelMultiServiceDeployer extends TypedEventEmitter {
     _deploymentId: string
   ): Record<string, string> {
     const env: Record<string, string> = {};
+    const primaryPublicServiceName = pickPrimaryPublicServiceName(buildTasks.map((task) => task.service));
+    const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
 
     // Create URL patterns for each service
     for (const task of buildTasks) {
@@ -977,7 +1052,10 @@ export class ParallelMultiServiceDeployer extends TypedEventEmitter {
       const servicePort = task.service.port || task.service.detection?.port || 3000;
       
       // External URL (via Traefik/public)
-      const externalUrl = `http://${projectSlug}-${serviceName}.${this.domain}`;
+      const publicHost = primaryPublicServiceName && serviceName === primaryPublicServiceName
+        ? projectSlug
+        : `${projectSlug}-${serviceName}`;
+      const externalUrl = `${protocol}://${publicHost}.${this.domain}`;
       
       // Internal URL (container-to-container in same network)
       // This will be the container name once deployed
@@ -989,7 +1067,7 @@ export class ParallelMultiServiceDeployer extends TypedEventEmitter {
       // Standard patterns used by various frameworks
       env[`${upperName}_URL`] = externalUrl;
       env[`${upperName}_SERVICE_URL`] = externalUrl;
-      env[`${upperName}_HOST`] = `${projectSlug}-${serviceName}.${this.domain}`;
+      env[`${upperName}_HOST`] = `${publicHost}.${this.domain}`;
       env[`${upperName}_PORT`] = servicePort.toString();
       
       // Common API URL patterns (for frontend services)

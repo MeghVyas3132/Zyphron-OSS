@@ -49,55 +49,53 @@ export interface PushResult {
 // ===========================================
 
 const DOCKERFILE_TEMPLATES: Record<string, (detection: DetectionResult) => string> = {
-  // Next.js standalone build
+  // Next.js build (works with or without output: 'standalone')
   nextjs: (d) => `
-# Stage 1: Dependencies
+# Stage 1: Install dependencies
 FROM node:${d.nodeVersion || '20'}-alpine AS deps
 WORKDIR /app
 
-# Copy package files
+RUN apk add --no-cache libc6-compat
 COPY package*.json ./
 ${d.packageManager === 'yarn' ? 'COPY yarn.lock ./' : ''}
-${d.packageManager === 'pnpm' ? 'COPY pnpm-lock.yaml ./' : ''}
+${d.packageManager === 'pnpm' ? 'COPY pnpm-lock.yaml* ./' : ''}
 
-# Install dependencies
 RUN ${d.installCommand}
 
-# Stage 2: Builder
+# Stage 2: Build the application
 FROM node:${d.nodeVersion || '20'}-alpine AS builder
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Disable Next.js telemetry
-ENV NEXT_TELEMETRY_DISABLED 1
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=production
 
-# Build the application
-RUN ${d.buildCommand || 'npm run build'}
+# Build with --no-lint: linting runs in CI, not at deploy time.
+# Preserve user's extra flags (e.g. --turbopack) from their package.json build script.
+RUN EXTRA_FLAGS=$(node -e "try{var p=require('./package.json');var s=(p.scripts&&p.scripts.build)||'';var m=s.match(/next\\s+build(.*)/);var f=(m?m[1]:'').replace(/--no-lint/g,'').trim();console.log(f);}catch(e){console.log('');}") && \\
+    ./node_modules/.bin/next build --no-lint $EXTRA_FLAGS
 
-# Stage 3: Runner
+# Stage 3: Production runner
 FROM node:${d.nodeVersion || '20'}-alpine AS runner
 WORKDIR /app
 
-ENV NODE_ENV production
-ENV NEXT_TELEMETRY_DISABLED 1
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3000
 
-# Create non-root user
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
+RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
 
-# Copy built application
 COPY --from=builder /app/public ./public
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./package.json
 
 USER nextjs
-
 EXPOSE 3000
-ENV PORT 3000
 
-CMD ["node", "server.js"]
+CMD ["node_modules/.bin/next", "start"]
 `.trim(),
 
   // React (Vite/CRA) with nginx
@@ -108,12 +106,12 @@ WORKDIR /app
 
 COPY package*.json ./
 ${d.packageManager === 'yarn' ? 'COPY yarn.lock ./' : ''}
-${d.packageManager === 'pnpm' ? 'COPY pnpm-lock.yaml ./' : ''}
+${d.packageManager === 'pnpm' ? 'COPY pnpm-lock.yaml* ./' : ''}
 
 RUN ${d.installCommand}
 
 COPY . .
-RUN ${d.buildCommand || 'npm run build'}
+RUN npm run build
 
 # Stage 2: Serve
 FROM nginx:alpine
@@ -141,7 +139,7 @@ WORKDIR /app
 
 COPY package*.json ./
 ${d.packageManager === 'yarn' ? 'COPY yarn.lock ./' : ''}
-${d.packageManager === 'pnpm' ? 'COPY pnpm-lock.yaml ./' : ''}
+${d.packageManager === 'pnpm' ? 'COPY pnpm-lock.yaml* ./' : ''}
 
 RUN ${d.installCommand}
 
@@ -172,15 +170,15 @@ WORKDIR /app
 
 COPY package*.json ./
 ${d.packageManager === 'yarn' ? 'COPY yarn.lock ./' : ''}
-${d.packageManager === 'pnpm' ? 'COPY pnpm-lock.yaml ./' : ''}
+${d.packageManager === 'pnpm' ? 'COPY pnpm-lock.yaml* ./' : ''}
 
 RUN ${d.installCommand}
 
 COPY . .
 
-${d.buildCommand ? `RUN ${d.buildCommand}` : ''}
+${d.buildCommand ? 'RUN npm run build' : ''}
 
-ENV NODE_ENV production
+ENV NODE_ENV=production
 EXPOSE ${d.port || 3000}
 
 CMD ${JSON.stringify((d.startCommand || 'node index.js').split(' '))}
@@ -195,12 +193,12 @@ WORKDIR /app
 
 COPY package*.json ./
 ${d.packageManager === 'yarn' ? 'COPY yarn.lock ./' : ''}
-${d.packageManager === 'pnpm' ? 'COPY pnpm-lock.yaml ./' : ''}
+${d.packageManager === 'pnpm' ? 'COPY pnpm-lock.yaml* ./' : ''}
 
 RUN ${d.installCommand}
 
 COPY . .
-RUN ${d.buildCommand || 'npm run build'}
+RUN npm run build
 
 # Stage 2: Production
 FROM node:${d.nodeVersion || '20'}-alpine
@@ -211,7 +209,7 @@ RUN npm ci --only=production
 
 COPY --from=builder /app/dist ./dist
 
-ENV NODE_ENV production
+ENV NODE_ENV=production
 EXPOSE ${d.port || 3000}
 
 CMD ["node", "dist/main.js"]
@@ -445,12 +443,19 @@ venv
       // Wait for build to complete and collect logs
       const imageId = await new Promise<string>((resolve, reject) => {
         let lastImageId = '';
+        let buildFailed = false;
+        let buildFailError = '';
 
         this.docker.modem.followProgress(
           stream,
           (err, _res) => {
             if (err) {
               reject(err);
+              return;
+            }
+            // If any error event was seen during the build, treat as failure
+            if (buildFailed) {
+              reject(new Error(buildFailError || 'Docker build failed'));
               return;
             }
             resolve(lastImageId);
@@ -467,7 +472,9 @@ venv
               lastImageId = event.aux.ID;
             }
             if (event.error) {
-              buildLogs.push(`Error Error: ${event.error}`);
+              buildFailed = true;
+              buildFailError = event.error;
+              buildLogs.push(`Error ${event.error}`);
               this.logMessage(`Error: ${event.error}`, onLog);
             }
           }

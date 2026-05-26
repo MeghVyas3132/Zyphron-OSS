@@ -172,9 +172,33 @@ export class DockerfileGenerator {
           baseImage: BASE_IMAGES.python.default,
           installCommand: 'pip install --no-cache-dir -r requirements.txt',
           buildCommand: null,
-          startCommand: 'gunicorn app:app --bind 0.0.0.0:5000',
-          port: 5000,
+          startCommand: detection.startCommand || 'gunicorn app:app --bind 0.0.0.0:5000',
+          port: detection.port || 5000,
           cacheDirectories: ['/root/.cache/pip'],
+        };
+
+      case 'streamlit':
+        return {
+          ...baseConfig,
+          baseImage: BASE_IMAGES.python.default,
+          installCommand: 'pip install --no-cache-dir -r requirements.txt',
+          buildCommand: null,
+          startCommand: detection.startCommand || 'streamlit run app.py --server.port=8501 --server.headless=true --server.address=0.0.0.0 --browser.gatherUsageStats=false',
+          port: 8501,
+          cacheDirectories: ['/root/.cache/pip'],
+          healthCheck: 'curl -f http://localhost:8501/_stcore/health || exit 1',
+        };
+
+      case 'gradio':
+        return {
+          ...baseConfig,
+          baseImage: BASE_IMAGES.python.default,
+          installCommand: 'pip install --no-cache-dir -r requirements.txt',
+          buildCommand: null,
+          startCommand: detection.startCommand || 'python app.py',
+          port: 7860,
+          cacheDirectories: ['/root/.cache/pip'],
+          healthCheck: 'curl -f http://localhost:7860 || exit 1',
         };
 
       case 'go':
@@ -262,8 +286,9 @@ export class DockerfileGenerator {
       return this.buildRustDockerfile(detection, config);
     }
 
-    // Python apps
-    if (['django', 'fastapi', 'flask'].includes(detection.framework)) {
+    // Python apps (all variants)
+    if (['django', 'fastapi', 'flask', 'streamlit', 'gradio', 'python'].includes(detection.framework)
+        || detection.language === 'python') {
       return this.buildPythonDockerfile(detection, config);
     }
 
@@ -601,12 +626,157 @@ CMD ["./app"]
   /**
    * Build Dockerfile for Python applications
    */
+  /**
+   * Maps Python import names to pip package names when they differ.
+   * Zyphron uses this to auto-inject packages that are imported but
+   * missing from requirements.txt / pyproject.toml.
+   */
+  private static readonly IMPORT_TO_PACKAGE: Record<string, string> = {
+    // Very common mismatches
+    dotenv:          'python-dotenv',
+    cv2:             'opencv-python-headless',
+    PIL:             'Pillow',
+    sklearn:         'scikit-learn',
+    skimage:         'scikit-image',
+    yaml:            'PyYAML',
+    bs4:             'beautifulsoup4',
+    dateutil:        'python-dateutil',
+    attr:            'attrs',
+    jwt:             'PyJWT',
+    cryptography:    'cryptography',
+    boto3:           'boto3',
+    botocore:        'botocore',
+    google:          'google-cloud-core',
+    psycopg2:        'psycopg2-binary',
+    MySQLdb:         'mysqlclient',
+    pymongo:         'pymongo',
+    redis:           'redis',
+    celery:          'celery',
+    pydantic:        'pydantic',
+    httpx:           'httpx',
+    aiohttp:         'aiohttp',
+    fastapi:         'fastapi',
+    uvicorn:         'uvicorn[standard]',
+    streamlit:       'streamlit',
+    gradio:          'gradio',
+    torch:                 'torch',
+    tensorflow:            'tensorflow',
+    keras:                 'keras',
+    numpy:                 'numpy',
+    pandas:                'pandas',
+    matplotlib:            'matplotlib',
+    seaborn:               'seaborn',
+    plotly:                'plotly',
+    scipy:                 'scipy',
+    nltk:                  'nltk',
+    spacy:                 'spacy',
+    transformers:          'transformers',
+    sentence_transformers: 'sentence-transformers',
+    chromadb:              'chromadb',
+    faiss:                 'faiss-cpu',
+    langchain:             'langchain',
+    openai:                'openai',
+    anthropic:             'anthropic',
+    groq:                  'groq',
+    cohere:                'cohere',
+    tiktoken:              'tiktoken',
+    huggingface_hub:       'huggingface-hub',
+    datasets:              'datasets',
+    tokenizers:            'tokenizers',
+    xgboost:               'xgboost',
+    lightgbm:              'lightgbm',
+    catboost:              'catboost',
+    shap:                  'shap',
+    optuna:                'optuna',
+    wandb:                 'wandb',
+    mlflow:                'mlflow',
+    stripe:          'stripe',
+    twilio:          'twilio',
+    sendgrid:        'sendgrid',
+    sqlalchemy:      'SQLAlchemy',
+    alembic:         'alembic',
+    passlib:         'passlib',
+    bcrypt:          'bcrypt',
+    arrow:           'arrow',
+    pendulum:        'pendulum',
+    rich:            'rich',
+    click:           'click',
+    typer:           'typer',
+  };
+
+  /**
+   * Scan Python source files for import statements and return
+   * any packages that appear to be missing from the requirements.
+   */
+  private scanPythonImports(projectPath: string, existingRequirements: string): string[] {
+    // This runs synchronously at Dockerfile generation time.
+    // We read files synchronously using Node's require-path sync APIs.
+    const missing: string[] = [];
+    const reqLower = existingRequirements.toLowerCase();
+
+    // Collect all top-level import names from the project
+    const importedNames = new Set<string>();
+    try {
+      const fss = require('fs') as typeof import('fs');
+      const pathMod = require('path') as typeof import('path');
+
+      const scanDir = (dir: string, depth = 0) => {
+        if (depth > 3) return;
+        let entries: string[] = [];
+        try { entries = fss.readdirSync(dir); } catch { return; }
+        for (const entry of entries) {
+          if (entry.startsWith('.') || entry === 'node_modules' || entry === '__pycache__' || entry === '.venv' || entry === 'venv') continue;
+          const full = pathMod.join(dir, entry);
+          let stat: import('fs').Stats;
+          try { stat = fss.statSync(full); } catch { continue; }
+          if (stat.isDirectory()) { scanDir(full, depth + 1); continue; }
+          if (!entry.endsWith('.py')) continue;
+          let src = '';
+          try { src = fss.readFileSync(full, 'utf-8'); } catch { continue; }
+          // Match: import X, from X import Y, import X as Y
+          const matches = src.matchAll(/^(?:import|from)\s+([a-zA-Z_][a-zA-Z0-9_]*)/gm);
+          for (const m of matches) importedNames.add(m[1]);
+        }
+      };
+      scanDir(projectPath);
+    } catch { /* non-fatal */ }
+
+    for (const importName of importedNames) {
+      const pipPkg = DockerfileGenerator.IMPORT_TO_PACKAGE[importName];
+      if (!pipPkg) continue;
+      // Check if it's already in requirements (any form)
+      const pkgBase = pipPkg.split('[')[0].toLowerCase().replace(/-/g, '').replace(/_/g, '');
+      const importBase = importName.toLowerCase().replace(/-/g, '').replace(/_/g, '');
+      const alreadyListed = reqLower.replace(/-/g, '').replace(/_/g, '').includes(pkgBase)
+        || reqLower.replace(/-/g, '').replace(/_/g, '').includes(importBase);
+      if (!alreadyListed) missing.push(pipPkg);
+    }
+
+    return [...new Set(missing)];
+  }
+
   private buildPythonDockerfile(detection: DetectionResult, config: DockerfileConfig): string {
     const isPipenv = detection.packageManager === 'pipenv' as PackageManager;
     const isPoetry = detection.packageManager === 'poetry';
 
     let installCmd = 'pip install --no-cache-dir -r requirements.txt';
     let copyDeps = 'COPY requirements.txt .';
+
+    // ── Auto-inject missing packages ────────────────────────────
+    // Scan source imports and auto-add anything not in requirements.txt
+    let autoInjectLine = '';
+    if (!isPipenv && !isPoetry) {
+      try {
+        const fss = require('fs') as typeof import('fs');
+        const reqPath = require('path').join(detection.projectPath ?? '', 'requirements.txt');
+        const existingReq = fss.existsSync(reqPath) ? fss.readFileSync(reqPath, 'utf-8') : '';
+        const missing = this.scanPythonImports(detection.projectPath ?? '', existingReq);
+        if (missing.length > 0) {
+          logger.info({ missing }, 'Auto-injecting missing Python packages');
+          autoInjectLine = `\n# Auto-injected by Zyphron (imported but missing from requirements.txt)\nRUN pip install --no-cache-dir ${missing.join(' ')}`;
+        }
+      } catch { /* non-fatal */ }
+    }
 
     if (isPipenv) {
       copyDeps = 'COPY Pipfile Pipfile.lock .';
@@ -628,14 +798,15 @@ WORKDIR /app
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \\
-    build-essential \\
+    build-essential curl \\
     && rm -rf /var/lib/apt/lists/*
 
 # Copy dependency files
 ${copyDeps}
 
-# Install dependencies
+# Install declared dependencies
 RUN ${installCmd}
+${autoInjectLine}
 
 # Copy source code
 COPY . .

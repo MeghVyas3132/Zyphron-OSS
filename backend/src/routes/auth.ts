@@ -713,7 +713,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       });
 
       logger.info({ userId: user.id }, 'User authenticated via GitHub (callback)');
-      return reply.redirect(`${frontendUrl}/auth/callback?token=${encodeURIComponent(token)}`);
+      return reply.redirect(`${frontendUrl}/callback?token=${encodeURIComponent(token)}`);
     } catch (error) {
       logger.error({ error }, 'GitHub callback error');
       return reply.redirect(`${frontendUrl}/login?error=github_failed`);
@@ -953,7 +953,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       });
 
       logger.info({ userId: user.id }, 'User authenticated via Google (callback)');
-      return reply.redirect(`${frontendUrl}/auth/callback?token=${encodeURIComponent(token)}`);
+      return reply.redirect(`${frontendUrl}/callback?token=${encodeURIComponent(token)}`);
     } catch (error) {
       logger.error({ error }, 'Google callback error');
       return reply.redirect(`${frontendUrl}/login?error=google_failed`);

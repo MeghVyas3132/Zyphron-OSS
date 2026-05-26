@@ -4,7 +4,8 @@
 // ===========================================
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
@@ -134,6 +135,11 @@ model Project {
   // Multi-service configuration
   isMultiService    Boolean   @default(false) @map("is_multi_service")
   serviceDetectionSource String? @map("service_detection_source") // docker-compose, turbo, nx, etc.
+
+  // Compose stack grouping
+  composeGroupId    String?   @map("compose_group_id")
+  composeServiceName String?  @map("compose_service_name") // service key in docker-compose.yml
+  composeGroup      ComposeGroup? @relation(fields: [composeGroupId], references: [id], onDelete: SetNull)
   
   // Build configuration
   buildCommand      String?   @map("build_command")
@@ -572,9 +578,36 @@ model SystemConfig {
   id        String   @id @default(uuid())
   key       String   @unique
   value     Json
-  
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
-  
+
   @@map("system_config")
+}
+
+// ===========================================
+// COMPOSE STACK GROUPS
+// ===========================================
+
+model ComposeGroup {
+  id              String    @id @default(uuid())
+  name            String
+  repositoryUrl   String    @map("repository_url")
+  composeFile     String    @default("docker-compose.yml") @map("compose_file")
+  branch          String    @default("main")
+
+  // Compose manifest snapshot (JSON)
+  manifest        Json?
+
+  // Ownership
+  userId          String    @map("user_id")
+  teamId          String?   @map("team_id")
+
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  projects        Project[]
+
+  @@map("compose_groups")
 }

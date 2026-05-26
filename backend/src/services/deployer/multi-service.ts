@@ -198,6 +198,39 @@ const MANAGED_SERVICE_CONFIG: Record<string, {
   },
 };
 
+// ── Name / image → config key aliases ───────────────────────
+// docker-compose service names and image base names often differ
+// from our MANAGED_SERVICE_CONFIG keys (e.g. "postgres" vs "postgresql").
+const MANAGED_SERVICE_ALIASES: Record<string, string> = {
+  // PostgreSQL
+  postgres:   'postgresql',
+  pg:         'postgresql',
+  // MySQL / MariaDB
+  mariadb:    'mysql',
+  // MongoDB
+  mongo:      'mongodb',
+};
+
+function resolveManagedConfig(service: ServiceDefinition) {
+  // Try exact key first
+  if (MANAGED_SERVICE_CONFIG[service.name]) return MANAGED_SERVICE_CONFIG[service.name];
+  // Try alias on name
+  const aliasedName = MANAGED_SERVICE_ALIASES[service.name.toLowerCase()];
+  if (aliasedName && MANAGED_SERVICE_CONFIG[aliasedName]) return MANAGED_SERVICE_CONFIG[aliasedName];
+  // Try image base name (e.g. "postgres:16-alpine" → "postgres" → alias → "postgresql")
+  if (service.image) {
+    const imageBase = service.image.split(':')[0].split('/').pop()?.toLowerCase() ?? '';
+    if (MANAGED_SERVICE_CONFIG[imageBase]) return MANAGED_SERVICE_CONFIG[imageBase];
+    const aliasedImage = MANAGED_SERVICE_ALIASES[imageBase];
+    if (aliasedImage && MANAGED_SERVICE_CONFIG[aliasedImage]) return MANAGED_SERVICE_CONFIG[aliasedImage];
+    // partial match (e.g. "postgres" starts with "postgres")
+    for (const [key, cfg] of Object.entries(MANAGED_SERVICE_CONFIG)) {
+      if (imageBase.startsWith(key) || key.startsWith(imageBase)) return cfg;
+    }
+  }
+  return undefined;
+}
+
 // ===========================================
 // MULTI-SERVICE DEPLOYER CLASS
 // ===========================================
@@ -299,7 +332,7 @@ export class MultiServiceDeployer {
             
             // Track environment variables this service provides
             if (service.type === 'managed') {
-              const managedConfig = MANAGED_SERVICE_CONFIG[service.name];
+              const managedConfig = resolveManagedConfig(service);
               if (managedConfig) {
                 serviceEnvMap[service.name] = this.generateConnectionEnv(
                   managedConfig.connectionEnvTemplate,
@@ -381,14 +414,13 @@ export class MultiServiceDeployer {
     envVars: Record<string, string>,
     log: (msg: string, level: string, service?: string) => void
   ): Promise<ServiceDeployResult> {
-    const managedType = service.name as keyof typeof MANAGED_SERVICE_CONFIG;
-    const config = MANAGED_SERVICE_CONFIG[managedType];
+    const config = resolveManagedConfig(service);
 
     if (!config) {
       return {
         serviceName: service.name,
         success: false,
-        error: `Unknown managed service type: ${service.name}`,
+        error: `Unknown managed service type: "${service.name}" (image: ${service.image ?? 'none'}). Supported: postgresql, mysql, mongodb, redis, rabbitmq, elasticsearch.`,
         duration: 0,
       };
     }

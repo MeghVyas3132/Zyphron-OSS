@@ -121,14 +121,11 @@ export class DeployerService {
         ZYPHRON_PROJECT_ID: projectId,
       }).map(([k, v]) => `${k}=${v}`);
 
-      // Health check configuration
-      const healthCheckConfig = healthCheck ? {
-        Test: ['CMD', 'curl', '-f', `http://localhost:${port}${healthCheck.path}`],
-        Interval: healthCheck.interval * 1_000_000_000,  // nanoseconds
-        Timeout: healthCheck.timeout * 1_000_000_000,
-        Retries: healthCheck.retries,
-        StartPeriod: healthCheck.startPeriod * 1_000_000_000,
-      } : undefined;
+      // No Docker health check: user apps don't have curl or /health endpoints.
+      // If Docker marks them "starting" or "unhealthy", Traefik will filter them out.
+      // Zyphron verifies health independently via verifyDeploymentHealth().
+      const healthCheckConfig = undefined;
+      void healthCheck; // keep param for API compatibility
 
       // Create container
       const container = await this.docker.createContainer({
@@ -162,20 +159,18 @@ export class DeployerService {
           [`traefik.http.routers.${containerName}-http.entrypoints`]: 'web',
           [`traefik.http.routers.${containerName}-http.service`]: containerName,
           ...(this.useHttps ? {
-            // Redirect HTTP → HTTPS
-            [`traefik.http.routers.${containerName}-http.middlewares`]: 'https-redirect@docker',
-            // HTTPS router with Let's Encrypt
+            // HTTP→HTTPS redirect is handled by the Traefik entrypoint (web → websecure),
+            // so no middleware needed on the HTTP router.
+            // HTTPS router with Let's Encrypt auto-cert
             [`traefik.http.routers.${containerName}.rule`]: `Host(\`${projectSlug}.${this.domain}\`)`,
             [`traefik.http.routers.${containerName}.entrypoints`]: 'websecure',
-            [`traefik.http.routers.${containerName}.tls`]: 'true',
             [`traefik.http.routers.${containerName}.tls.certresolver`]: 'letsencrypt',
             [`traefik.http.routers.${containerName}.service`]: containerName,
           } : {}),
           [`traefik.http.services.${containerName}.loadbalancer.server.port`]: port.toString(),
-          // Health check via Traefik
-          [`traefik.http.services.${containerName}.loadbalancer.healthcheck.path`]: '/health',
-          [`traefik.http.services.${containerName}.loadbalancer.healthcheck.interval`]: '10s',
-          [`traefik.http.services.${containerName}.loadbalancer.healthcheck.timeout`]: '3s',
+          // No Traefik health check — Zyphron verifies health at deploy time.
+          // Letting Traefik health-check /health would kill Next.js/React apps
+          // that don't expose that path.
         },
       });
 

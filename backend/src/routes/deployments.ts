@@ -65,7 +65,7 @@ export async function deploymentRoutes(app: FastifyInstance): Promise<void> {
     ]);
 
     return reply.send({
-      deployments,
+      data: deployments,
       pagination: { page: query.page, limit: query.limit, total, totalPages: Math.ceil(total / query.limit) },
     });
   });

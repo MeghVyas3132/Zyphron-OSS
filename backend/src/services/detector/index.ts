@@ -27,6 +27,7 @@ export interface DetectionResult {
   env: Record<string, string>;
   dockerfileExists: boolean;
   confidence: number; // 0-100
+  projectPath?: string; // populated by detectProject for use in Dockerfile generation
 }
 
 export type FrameworkType =
@@ -48,6 +49,9 @@ export type FrameworkType =
   | 'flask'
   | 'django'
   | 'fastapi'
+  | 'streamlit'
+  | 'gradio'
+  | 'python'
   | 'rails'
   | 'laravel'
   | 'spring'
@@ -397,15 +401,59 @@ const pythonDetector: FrameworkDetector = {
     let port = 5000;
 
     if (hasRequirements) {
-      const content = await fs.readFile(requirementsFile, 'utf-8');
-      if (content.includes('django')) {
+      const content = await fs.readFile(requirementsFile, 'utf-8').catch(() => '');
+      const lower = content.toLowerCase();
+      if (lower.includes('django')) {
         framework = 'django';
-        startCommand = 'python manage.py runserver 0.0.0.0:8000';
+        startCommand = 'gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2';
         port = 8000;
-      } else if (content.includes('fastapi') || content.includes('uvicorn')) {
+      } else if (lower.includes('fastapi') || lower.includes('uvicorn')) {
         framework = 'fastapi';
         startCommand = 'uvicorn main:app --host 0.0.0.0 --port 8000';
         port = 8000;
+      } else if (lower.includes('streamlit')) {
+        framework = 'streamlit' as FrameworkType;
+        startCommand = 'streamlit run app.py --server.port=8501 --server.headless=true --server.address=0.0.0.0 --browser.gatherUsageStats=false';
+        port = 8501;
+      } else if (lower.includes('gradio')) {
+        framework = 'gradio' as FrameworkType;
+        startCommand = 'python app.py';
+        port = 7860;
+      } else if (lower.includes('flask')) {
+        framework = 'flask';
+        startCommand = 'gunicorn app:app --bind 0.0.0.0:5000 --workers 2';
+        port = 5000;
+      } else {
+        // Scan Python source files for framework imports
+        const pyFiles = ['app.py', 'main.py', 'server.py', 'run.py', 'wsgi.py'];
+        for (const pyFile of pyFiles) {
+          const pyPath = path.join(projectPath, pyFile);
+          const src = await fs.readFile(pyPath, 'utf-8').catch(() => '');
+          if (src.includes('import streamlit') || src.includes('from streamlit')) {
+            framework = 'streamlit' as FrameworkType;
+            startCommand = `streamlit run ${pyFile} --server.port=8501 --server.headless=true --server.address=0.0.0.0 --browser.gatherUsageStats=false`;
+            port = 8501;
+            break;
+          }
+          if (src.includes('import gradio') || src.includes('from gradio')) {
+            framework = 'gradio' as FrameworkType;
+            startCommand = `python ${pyFile}`;
+            port = 7860;
+            break;
+          }
+          if (src.includes('Flask(') || src.includes('from flask')) {
+            framework = 'flask';
+            startCommand = `gunicorn ${pyFile.replace('.py','')}:app --bind 0.0.0.0:5000 --workers 2`;
+            port = 5000;
+            break;
+          }
+          if (src.includes('FastAPI(') || src.includes('from fastapi')) {
+            framework = 'fastapi';
+            startCommand = `uvicorn ${pyFile.replace('.py','')}:app --host 0.0.0.0 --port 8000`;
+            port = 8000;
+            break;
+          }
+        }
       }
     }
 
@@ -589,7 +637,7 @@ export async function detectProject(projectPath: string): Promise<DetectionResul
           language: result.language,
           confidence: result.confidence,
         }, 'Project detected');
-        return result;
+        return { ...result, projectPath };
       }
     } catch (error) {
       logger.warn({ detector: detector.name, error }, 'Detector error');

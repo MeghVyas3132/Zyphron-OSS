@@ -57,6 +57,9 @@ export interface ServiceDefinition {
     name: string;
     path: string;
   }[];
+
+  // Command override (from docker-compose `command` field)
+  command?: string[];
 }
 
 export interface MultiServiceConfig {
@@ -309,7 +312,7 @@ export class MultiServiceDetector {
           image: config.image as string,
           port: MANAGED_SERVICES[managedType]?.defaultPort,
           internalOnly: true,
-          dependsOn: (config.depends_on as string[]) || [],
+          dependsOn: this.parseDependsOn(config.depends_on),
           environment: this.parseEnvironment(config.environment),
           volumes: this.parseVolumes(config.volumes as string[]),
         });
@@ -347,11 +350,12 @@ export class MultiServiceDetector {
           port: detection?.port || ports.internal || 3000,
           exposedPort: ports.external,
           internalOnly: !ports.external,
-          dependsOn: (config.depends_on as string[]) || [],
+          dependsOn: this.parseDependsOn(config.depends_on),
           environment: this.parseEnvironment(config.environment),
           healthCheck: this.parseHealthCheck(config.healthcheck as Record<string, unknown>),
           resources: this.parseResources(config.deploy as Record<string, unknown>),
           volumes: this.parseVolumes(config.volumes as string[]),
+          command: this.parseCommand(config.command),
         });
       }
     }
@@ -725,6 +729,24 @@ export class MultiServiceDetector {
     
     return {};
   }
+
+  private parseDependsOn(dependsOn: unknown): string[] {
+    if (!dependsOn) return [];
+
+    if (Array.isArray(dependsOn)) {
+      return dependsOn.filter((item): item is string => typeof item === 'string' && item !== '<<');
+    }
+
+    if (typeof dependsOn === 'object') {
+      return Object.keys(dependsOn as Record<string, unknown>).filter(name => name !== '<<');
+    }
+
+    if (typeof dependsOn === 'string') {
+      return [dependsOn];
+    }
+
+    return [];
+  }
   
   private parsePorts(ports?: string[]): { internal?: number; external?: number } {
     if (!ports || ports.length === 0) return {};
@@ -797,6 +819,18 @@ export class MultiServiceDetector {
       });
   }
   
+  private parseCommand(command: unknown): string[] | undefined {
+    if (!command) return undefined;
+    if (typeof command === 'string') {
+      // Split shell-style command string into array
+      return command.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)?.map(s => s.replace(/^['"]|['"]$/g, '')) ?? command.split(/\s+/);
+    }
+    if (Array.isArray(command)) {
+      return (command as unknown[]).map(String);
+    }
+    return undefined;
+  }
+
   private async expandWorkspaceGlobs(projectPath: string, patterns: string[]): Promise<string[]> {
     const results: string[] = [];
     

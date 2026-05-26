@@ -48,7 +48,7 @@ const logPublisher = getBuildLogPublisher();
 // Multi-service deployer (Docker mode only)
 const multiServiceDetector = getMultiServiceDetector();
 const parallelDeployer = new ParallelMultiServiceDeployer(
-  'zyphron-network',
+  process.env.DOCKER_NETWORK || 'zyphron-network',
   config.deployment.baseDomain || 'localhost',
   config.docker.registry || 'localhost:5000'
 );
@@ -527,7 +527,9 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
     // STEP 7: Post-deploy health verification + auto-rollback
     // =============================================
     await publishLog('Verify Verifying deployment health...', 'info', 'verify', 97);
-    const isHealthy = await verifyDeploymentHealth(deployResult.externalUrl, 60, 3);
+    // Prefer internal URL (container-to-container, avoids TLS/DNS issues for new subdomains)
+    const healthCheckUrl = deployResult.internalUrl || deployResult.externalUrl;
+    const isHealthy = await verifyDeploymentHealth(healthCheckUrl, 90, 2);
 
     if (!isHealthy) {
       // Auto-rollback to previous live deployment
@@ -628,12 +630,14 @@ async function handleDeploymentCreated(event: DeploymentEvent): Promise<void> {
     });
 
     // Update deployment status to FAILED
+    // Also write errorMessage to buildLogs so the UI always has something to show
     await prisma.deployment.update({
       where: { id: deploymentId },
       data: {
         status: 'FAILED',
         completedAt: new Date(),
         errorMessage,
+        buildLogs: errorMessage,
       },
     });
     await prisma.buildJob.updateMany({
@@ -975,7 +979,7 @@ async function handleMultiServiceDeployment(
 
     // Find the primary service (first exposed service)
     const primaryService = result.services.find(s => s.externalUrl) || result.services[0];
-    const primaryUrl = primaryService?.externalUrl || `http://${project.slug}.${config.deployment.baseDomain}`;
+    const primaryUrl = primaryService?.externalUrl || `https://${project.slug}.${config.deployment.baseDomain}`;
 
     // Update deployment status
     await prisma.deployment.update({
@@ -1137,6 +1141,7 @@ async function handleMultiServiceDeployment(
         status: 'FAILED',
         completedAt: new Date(),
         errorMessage,
+        buildLogs: errorMessage,
       },
     });
     await prisma.buildJob.updateMany({
