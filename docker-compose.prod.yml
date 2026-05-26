@@ -179,7 +179,21 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     networks: [zyphron]
 
-  # ─── Frontend ────────────────────────────────────────────────
+  # ─── Landing Page (zyphron.space) ───────────────────────────
+  landing:
+    image: ${REGISTRY_URL:-localhost:5000}/zyphron-landing:latest
+    restart: unless-stopped
+    mem_limit: 64m
+    networks: [zyphron]
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.landing.rule=Host(`${DOMAIN}`)
+      - traefik.http.routers.landing.entrypoints=websecure
+      - traefik.http.routers.landing.tls.certresolver=letsencrypt
+      - traefik.http.routers.landing.service=landing
+      - traefik.http.services.landing.loadbalancer.server.port=80
+
+  # ─── Dashboard App (app.zyphron.space) ──────────────────────
   frontend:
     image: ${REGISTRY_URL:-localhost:5000}/zyphron-frontend:latest
     restart: unless-stopped
@@ -187,12 +201,12 @@ services:
     environment:
       NODE_ENV: production
       NEXT_PUBLIC_API_URL: https://api.${DOMAIN}
-      NEXT_PUBLIC_APP_URL: https://${DOMAIN}
-      NEXT_PUBLIC_GRAFANA_URL: https://${DOMAIN}/grafana
+      NEXT_PUBLIC_APP_URL: https://app.${DOMAIN}
+      NEXT_PUBLIC_GRAFANA_URL: https://app.${DOMAIN}/grafana
     networks: [zyphron]
     labels:
       - traefik.enable=true
-      - traefik.http.routers.frontend.rule=Host(`${DOMAIN}`)
+      - traefik.http.routers.frontend.rule=Host(`app.${DOMAIN}`)
       - traefik.http.routers.frontend.entrypoints=websecure
       - traefik.http.routers.frontend.tls.certresolver=letsencrypt
       - traefik.http.routers.frontend.service=frontend
@@ -235,7 +249,7 @@ services:
     networks: [zyphron]
     labels:
       - traefik.enable=true
-      - traefik.http.routers.grafana.rule=Host(`${DOMAIN}`) && PathPrefix(`/grafana`)
+      - traefik.http.routers.grafana.rule=Host(`app.${DOMAIN}`) && PathPrefix(`/grafana`)
       - traefik.http.routers.grafana.entrypoints=websecure
       - traefik.http.routers.grafana.tls.certresolver=letsencrypt
       - traefik.http.routers.grafana.service=grafana

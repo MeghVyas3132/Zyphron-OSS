@@ -28,12 +28,12 @@ WORKDIR /app
 COPY backend/package*.json ./
 
 # ---------------------------------------------
-# Stage 2: Development
+# Stage 2: Builder (compiles TypeScript)
 # ---------------------------------------------
-FROM base AS development
+FROM base AS builder
 
-# Install all dependencies
-RUN npm install
+# Install ALL dependencies (including devDependencies for tsc)
+RUN npm ci
 
 # Copy backend source code
 COPY backend/ .
@@ -41,34 +41,40 @@ COPY backend/ .
 # Generate Prisma client
 RUN npx prisma generate 2>/dev/null || true
 
-# Worker command
-CMD ["npm", "run", "worker:dev"]
+# Build TypeScript — must succeed to get dist/
+RUN npm run build
+
+# Prune devDependencies after build
+RUN npm prune --omit=dev
 
 # ---------------------------------------------
 # Stage 3: Production
 # ---------------------------------------------
-FROM base AS production
+FROM node:20-alpine AS production
 
-# Install production dependencies
-RUN npm ci --only=production
+# Install runtime system dependencies
+RUN apk add --no-cache \
+    curl \
+    git \
+    docker-cli \
+    bash \
+    openssh-client \
+    openssl \
+    && rm -rf /var/cache/apk/*
 
 WORKDIR /app
 
-# Create non-root user (but needs docker access)
-RUN addgroup -g 1001 -S zyphron && \
-    adduser -S zyphron -u 1001 -G zyphron
-
 # Copy built application
-COPY --from=development /app/dist ./dist
-COPY --from=development /app/node_modules ./node_modules
-COPY --from=development /app/package*.json ./
-COPY --from=development /app/prisma ./prisma
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/prisma ./prisma
 
-# Worker needs docker socket access
-# Note: In production, use rootless docker or adjust permissions
+# Ensure /app/projects directory exists (volume will be mounted over it)
+RUN mkdir -p /app/projects
 
 # Health check (workers don't have HTTP, check process)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD pgrep -x node || exit 1
 
-CMD ["node", "dist/worker/index.js"]
+CMD ["node", "dist/worker.js"]

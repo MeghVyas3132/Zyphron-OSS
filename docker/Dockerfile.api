@@ -50,8 +50,8 @@ CMD ["npm", "run", "dev"]
 # ---------------------------------------------
 FROM base AS builder
 
-# Install production dependencies only
-RUN npm ci --only=production
+# Install ALL dependencies (including devDependencies for tsc)
+RUN npm ci
 
 # Copy backend source and build
 COPY backend/ .
@@ -59,8 +59,11 @@ COPY backend/ .
 # Generate Prisma client
 RUN npx prisma generate 2>/dev/null || true
 
-# Build TypeScript
-RUN npm run build 2>/dev/null || true
+# Build TypeScript — must succeed to get dist/
+RUN npm run build
+
+# Prune devDependencies after build
+RUN npm prune --omit=dev
 
 # ---------------------------------------------
 # Stage 4: Production
@@ -68,16 +71,14 @@ RUN npm run build 2>/dev/null || true
 FROM node:20-alpine AS production
 
 # Install only runtime dependencies
+# openssl is required by Prisma for engine target detection (linux-musl-openssl-3.0.x)
 RUN apk add --no-cache \
     curl \
     docker-cli \
+    openssl \
     && rm -rf /var/cache/apk/*
 
 WORKDIR /app
-
-# Create non-root user
-RUN addgroup -g 1001 -S zyphron && \
-    adduser -S zyphron -u 1001 -G zyphron
 
 # Copy built application
 COPY --from=builder /app/dist ./dist
@@ -85,10 +86,8 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/prisma ./prisma
 
-# Set ownership
-RUN chown -R zyphron:zyphron /app
-
-USER zyphron
+# Ensure /app/projects exists and is writable at runtime
+RUN mkdir -p /app/projects
 
 # Expose port
 EXPOSE 3000

@@ -24,36 +24,9 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:9090']
 
-  # Zyphron API metrics
+  # Zyphron API metrics (exposed at /api/v1/metrics)
   - job_name: 'zyphron-api'
     static_configs:
       - targets: ['api:3000']
-    metrics_path: '/metrics'
+    metrics_path: '/api/v1/metrics'
     scrape_interval: 10s
-
-  # Zyphron Worker metrics
-  - job_name: 'zyphron-worker'
-    static_configs:
-      - targets: ['worker:3001']
-    metrics_path: '/metrics'
-    scrape_interval: 10s
-
-  # Redis metrics (via redis_exporter if added)
-  - job_name: 'redis'
-    static_configs:
-      - targets: ['redis:6379']
-
-  # PostgreSQL metrics (via postgres_exporter if added)
-  - job_name: 'postgres'
-    static_configs:
-      - targets: ['postgres:5432']
-
-  # Kafka metrics
-  - job_name: 'kafka'
-    static_configs:
-      - targets: ['kafka:9092']
-
-  # Docker metrics (if docker daemon exposes metrics)
-  - job_name: 'docker'
-    static_configs:
-      - targets: ['host.docker.internal:9323']

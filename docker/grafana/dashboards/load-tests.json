@@ -1,0 +1,215 @@
+{
+  "id": null,
+  "uid": "zyphron-stress",
+  "title": "Zyphron — Load Tests",
+  "description": "Platform health during and after k6 load tests. Run tests from the Load Testing page.",
+  "tags": ["zyphron", "k6"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "timepicker": {},
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "How to run a load test",
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "## Running Load Tests\n\nGo to **Load Testing** in the sidebar, select a project with a **live deployment**, configure VUs and duration, then click **Run Load Test**. Results appear immediately in the UI. This dashboard shows the platform's own health metrics while tests run."
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Live Deployments",
+      "description": "Active deployments being tested",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 4 },
+      "datasource": "Prometheus",
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red",    "value": null },
+              { "color": "green",  "value": 1 }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "zyphron_active_deployments",
+          "legendFormat": "Live",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Total Projects",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 4 },
+      "datasource": "Prometheus",
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "zyphron_projects_total",
+          "legendFormat": "Projects",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Pending Deployments",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 4 },
+      "datasource": "Prometheus",
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": null },
+              { "color": "yellow", "value": 3 },
+              { "color": "red",    "value": 10 }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "zyphron_pending_deployments",
+          "legendFormat": "Pending",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Redis Memory",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 4 },
+      "datasource": "Prometheus",
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": null },
+              { "color": "yellow", "value": 52428800  },
+              { "color": "red",    "value": 209715200 }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "zyphron_redis_memory_bytes",
+          "legendFormat": "Redis",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Deployment Activity During Test Window",
+      "description": "Watch for deployment status changes while load tests run",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 8 },
+      "datasource": "Prometheus",
+      "options": {
+        "legend": { "calcs": ["last"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 12,
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "mappings": []
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "LIVE"    }, "properties": [{ "id": "color", "value": { "fixedColor": "#73bf69", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "FAILED"  }, "properties": [{ "id": "color", "value": { "fixedColor": "#f2495c", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "BUILDING"}, "properties": [{ "id": "color", "value": { "fixedColor": "#ff9830", "mode": "fixed" } }] }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "zyphron_deployments_by_status",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "zyphron_active_deployments",
+          "legendFormat": "Active (live)",
+          "refId": "B"
+        }
+      ]
+    }
+  ]
+}
