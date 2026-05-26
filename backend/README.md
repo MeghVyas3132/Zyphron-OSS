@@ -1,84 +1,115 @@
 # Zyphron Backend
 
-The core API service for Zyphron deployment platform, built with Fastify and TypeScript.
+Backend API and worker runtime for Zyphron.
+
+## Scope
+
+This service handles authentication, project/deployment lifecycle, build orchestration, environment and domain management, team and audit features, plus observability and advanced deployment endpoints.
 
 ## Tech Stack
 
-- **Framework**: Fastify
-- **Language**: TypeScript
-- **Database**: PostgreSQL with Prisma ORM
-- **Queue**: BullMQ with Redis
-- **Messaging**: Apache Kafka
-- **Auth**: JWT with bcrypt
+- Fastify + TypeScript
+- Prisma + PostgreSQL
+- Redis + BullMQ
+- Optional Kafka (enabled in dev compose, disabled in prod compose)
+- Docker socket integration for image build/deploy workflows
 
-## Project Structure
+## Code Map
 
-```
+```text
 backend/
-├── src/
-│   ├── app.ts              # Fastify app setup
-│   ├── index.ts            # API server entry point
-│   ├── worker.ts           # Worker process entry point
-│   ├── config/             # Configuration
-│   ├── lib/                # Shared libraries
-│   │   ├── logger.ts       # Pino logger
-│   │   ├── prisma.ts       # Prisma client
-│   │   ├── redis.ts        # Redis client
-│   │   └── kafka.ts        # Kafka producer
-│   ├── routes/             # API routes
-│   │   ├── auth.ts         # Authentication
-│   │   ├── projects.ts     # Project management
-│   │   ├── deployments.ts  # Deployment management
-│   │   ├── databases.ts    # Database provisioning
-│   │   ├── env.ts          # Environment variables
-│   │   └── webhooks.ts     # GitHub webhooks
-│   └── types/              # TypeScript types
-├── prisma/
-│   └── schema.prisma       # Database schema
-├── package.json
-└── tsconfig.json
+  src/
+    app.ts
+    index.ts                 API entry
+    worker.ts                worker entry
+    config/                  config schema and env loading
+    routes/                  API route modules
+    services/                detector/builder/deployer/etc
+    lib/                     shared clients and utils
+  prisma/
+    schema.prisma
+    migrations/
 ```
 
-## API Endpoints
+## Route Groups
 
-### Authentication
-- `POST /api/v1/auth/register` - Register new user
-- `POST /api/v1/auth/login` - Login user
-- `GET /api/v1/auth/me` - Get current user
+Routes are exported from `src/routes/index.ts`:
 
-### Projects
-- `GET /api/v1/projects` - List projects
-- `POST /api/v1/projects` - Create project
-- `GET /api/v1/projects/:slug` - Get project
-- `PUT /api/v1/projects/:slug` - Update project
-- `DELETE /api/v1/projects/:slug` - Delete project
+- `health`
+- `auth`, `github`, `ai`
+- `projects`, `deployments`, `services`, `previews`
+- `env`, `databases`, `db-branching`
+- `domains`, `strategies`, `edge`, `chaos`, `observability`, `metrics`
+- `teams`, `api-keys`, `audit`, `self-deploy`
+- `cloud` (currently disabled/not implemented)
 
-### Deployments
-- `GET /api/v1/projects/:slug/deployments` - List deployments
-- `POST /api/v1/projects/:slug/deployments` - Create deployment
-- `GET /api/v1/projects/:slug/deployments/:id` - Get deployment
-
-### Environment Variables
-- `GET /api/v1/projects/:slug/env` - List env vars
-- `PUT /api/v1/projects/:slug/env` - Set env vars
-- `DELETE /api/v1/projects/:slug/env/:key` - Delete env var
-
-### Databases
-- `GET /api/v1/databases` - List databases
-- `POST /api/v1/databases` - Create database
-- `DELETE /api/v1/databases/:id` - Delete database
-
-## Development
-
-The backend runs as part of the Docker Compose setup. From the root directory:
+## Scripts
 
 ```bash
-# Start all services
-docker-compose -f docker-compose.dev.yml up
+npm run dev            # API in watch mode
+npm run worker:dev     # worker in watch mode
+npm run build
+npm run start
+npm run worker:start
+npm run test
+npm run lint
+npm run typecheck
+```
 
-# Backend API will be available at http://localhost:3000
+Database and Prisma:
+
+```bash
+npm run db:generate
+npm run db:migrate
+npm run db:push
+npm run db:studio
 ```
 
 ## Environment Variables
 
-See `.env.example` in the root directory for required environment variables.
+Config is validated in `src/config/index.ts`.
+
+Required for normal runtime:
+
+- `DATABASE_URL`
+- `JWT_SECRET` (min 32 chars)
+
+Commonly required in real deployments:
+
+- `REDIS_URL`
+- `BASE_DOMAIN`
+- `CONTAINER_REGISTRY`
+- `PROJECTS_DIR`
+- `ENCRYPTION_KEY`
+
+Optional integrations:
+
+- GitHub OAuth: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_CALLBACK_URL`
+- Google OAuth: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL`
+- Groq: `GROQ_API_KEYS`, `GROQ_MODEL`
+- Resend: `RESEND_API_KEYS`, `RESEND_FROM`, `RESEND_REPLY_TO`
+- Prometheus: `PROMETHEUS_URL`
+
+## Local Run
+
+From repo root:
+
+```bash
+docker compose -f docker-compose.dev.yml up --build
+```
+
+Direct local API run:
+
+```bash
+cd backend
+npm install
+npm run db:generate
+npm run db:migrate
+npm run dev
+```
+
+## Notes
+
+- Production compose sets `KAFKA_ENABLED=false` by default.
+- `cloud` routes are not active features today and should not be treated as shipped cloud orchestration.
+
